@@ -1,5 +1,15 @@
 import { create } from 'zustand'
-import type { User } from '../types'
+
+interface User {
+  _id: string
+  username: string
+  email: string
+  isAdmin: boolean
+  avatar?: string
+  token: string
+  continueWatching?: any[]
+  recentlyViewed?: any[]
+}
 
 interface AuthState {
   user: User | null
@@ -7,17 +17,25 @@ interface AuthState {
   logout: () => void
 }
 
-const stored = localStorage.getItem('streamix_user')
+let stored: User | null = null
+try {
+  const raw = localStorage.getItem('streamix_user')
+  if (raw) stored = JSON.parse(raw)
+} catch {
+  stored = null
+}
 
 export const useAuthStore = create<AuthState>((set) => ({
-  user: stored ? JSON.parse(stored) : null,
+  user: stored,
   setUser: (user) => {
-    if (user) localStorage.setItem('streamix_user', JSON.stringify(user))
-    else localStorage.removeItem('streamix_user')
+    try {
+      if (user) localStorage.setItem('streamix_user', JSON.stringify(user))
+      else localStorage.removeItem('streamix_user')
+    } catch {}
     set({ user })
   },
   logout: () => {
-    localStorage.removeItem('streamix_user')
+    try { localStorage.removeItem('streamix_user') } catch {}
     set({ user: null })
   },
 }))

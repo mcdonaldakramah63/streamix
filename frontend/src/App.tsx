@@ -1,6 +1,5 @@
 import { Routes, Route, Navigate } from 'react-router-dom'
 import { useAuthStore } from './context/authStore'
-import { useAdBlocker } from './hooks/useAdBlocker'
 import Navbar from './components/Navbar'
 import Footer from './components/Footer'
 import Home from './pages/Home'
@@ -27,8 +26,6 @@ const AdminRoute = ({ children }: { children: React.ReactNode }) => {
 }
 
 export default function App() {
-  useAdBlocker()
-
   return (
     <div className="min-h-screen bg-dark text-white flex flex-col">
       <Navbar />

@@ -34,15 +34,7 @@ app.use(helmet.referrerPolicy({ policy: 'strict-origin-when-cross-origin' }))
 
 // ── CORS ─────────────────────────────────────────────────────────
 const allowed = (process.env.ALLOWED_ORIGINS || 'http://localhost:5173').split(',').map(o => o.trim())
-app.use(cors({
-  origin: (origin, cb) => {
-    if (!origin || allowed.includes(origin)) return cb(null, true)
-    cb(new Error(`CORS blocked: ${origin}`))
-  },
-  credentials: true,
-  methods: ['GET','POST','PUT','DELETE','OPTIONS'],
-  allowedHeaders: ['Content-Type','Authorization'],
-}))
+app.use(cors({ origin: '*', credentials: false }))
 
 // ── Body parser (10kb limit prevents payload attacks) ────────────
 app.use(express.json({ limit: '10kb' }))

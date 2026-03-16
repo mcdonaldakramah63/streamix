@@ -4,14 +4,12 @@ import { BrowserRouter } from 'react-router-dom'
 import App from './App'
 import './index.css'
 
-// Unregister any broken service workers from previous installs
+// Unregister ALL service workers
 if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.getRegistrations().then(registrations => {
-    registrations.forEach(reg => {
-      reg.unregister()
-      console.log('[Streamix] Cleared old service worker')
-    })
+  navigator.serviceWorker.getRegistrations().then(regs => {
+    regs.forEach(r => r.unregister())
   })
+  caches.keys().then(keys => keys.forEach(k => caches.delete(k)))
 }
 
 ReactDOM.createRoot(document.getElementById('root')!).render(

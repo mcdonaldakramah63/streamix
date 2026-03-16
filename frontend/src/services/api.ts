@@ -2,7 +2,7 @@ import axios from 'axios'
 import { secureStorage } from '../utils/secureStorage'
 
 const api = axios.create({
-  baseURL: import.meta.env.VITE_API_URL || '/api',
+  baseURL: 'https://streamix-usak.onrender.com/api',
   timeout: 15000,
   headers: { 'Content-Type': 'application/json' },
 })

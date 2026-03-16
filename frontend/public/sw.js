@@ -1,18 +1,9 @@
-// This service worker unregisters itself and clears all caches
-// Fixes the infinite loading caused by the previous broken service worker
-
+// Empty service worker - unregisters self
 self.addEventListener('install', () => self.skipWaiting())
-
-self.addEventListener('activate', (event) => {
-  event.waitUntil(
-    Promise.all([
-      // Delete ALL caches
-      caches.keys().then(keys => Promise.all(keys.map(k => caches.delete(k)))),
-      // Unregister this service worker
-      self.registration.unregister(),
-    ])
+self.addEventListener('activate', (e) => {
+  e.waitUntil(
+    caches.keys().then(k => Promise.all(k.map(c => caches.delete(c))))
+      .then(() => self.registration.unregister())
   )
 })
-
-// Pass ALL requests through — no interception
 self.addEventListener('fetch', () => {})
