@@ -1,0 +1,15 @@
+const express = require('express');
+const c = require('../controllers/movieController');
+const r = express.Router();
+r.get('/trending',    c.trending);
+r.get('/popular',     c.popular);
+r.get('/top-rated',   c.topRated);
+r.get('/upcoming',    c.upcoming);
+r.get('/tv/popular',  c.tvShows);
+r.get('/tv/trending', c.trendingTV);
+r.get('/genres',      c.genres);
+r.get('/search',      c.search);
+r.get('/:id',         c.details);
+r.get('/tv/:id',      c.tvDetails);
+r.get('/tv/:id/season/:season', c.season);
+module.exports = r;
