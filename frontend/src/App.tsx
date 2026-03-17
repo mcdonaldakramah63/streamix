@@ -1,5 +1,6 @@
 import { Routes, Route, Navigate } from 'react-router-dom'
 import { useAuthStore } from './context/authStore'
+import { useAdBlocker } from './hooks/useAdBlocker'
 import Navbar from './components/Navbar'
 import Footer from './components/Footer'
 import Home from './pages/Home'
@@ -26,10 +27,13 @@ const AdminRoute = ({ children }: { children: React.ReactNode }) => {
 }
 
 export default function App() {
+  useAdBlocker()
+
   return (
     <div className="min-h-screen bg-dark text-white flex flex-col">
       <Navbar />
-      <main className="flex-1">
+      {/* pb-16 on mobile to account for bottom tab bar; md:pb-0 removes it on desktop */}
+      <main className="flex-1 pb-16 md:pb-0">
         <Routes>
           <Route path="/"                 element={<Home />} />
           <Route path="/tv"               element={<TVShows />} />

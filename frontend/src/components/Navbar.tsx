@@ -4,237 +4,305 @@ import { useAuthStore } from '../context/authStore'
 import axios from 'axios'
 
 interface Suggestion {
-  id: number
-  title?: string
-  name?: string
-  poster_path: string | null
-  media_type: 'movie' | 'tv' | 'person'
-  release_date?: string
-  first_air_date?: string
-  vote_average?: number
+  id: number; title?: string; name?: string; poster_path: string | null
+  media_type: 'movie' | 'tv' | 'person'; release_date?: string; first_air_date?: string; vote_average?: number
 }
 
 const IMG = 'https://image.tmdb.org/t/p/w92'
 
 export default function Navbar() {
   const { user, logout } = useAuthStore()
-  const navigate = useNavigate()
-  const location = useLocation()
+  const navigate  = useNavigate()
+  const location  = useLocation()
 
-  const [scrolled,     setScrolled]     = useState(false)
-  const [query,        setQuery]        = useState('')
-  const [suggestions,  setSuggestions]  = useState<Suggestion[]>([])
-  const [showSug,      setShowSug]      = useState(false)
-  const [sugLoading,   setSugLoading]   = useState(false)
-  const [activeSug,    setActiveSug]    = useState(-1)
-  const [menuOpen,     setMenuOpen]     = useState(false)
+  const [scrolled,    setScrolled]    = useState(false)
+  const [query,       setQuery]       = useState('')
+  const [suggestions, setSuggestions] = useState<Suggestion[]>([])
+  const [showSug,     setShowSug]     = useState(false)
+  const [sugLoading,  setSugLoading]  = useState(false)
+  const [userMenu,    setUserMenu]    = useState(false)
+  const [drawer,      setDrawer]      = useState(false)
+  const [searchOpen,  setSearchOpen]  = useState(false)
 
-  const searchRef  = useRef<HTMLDivElement>(null)
-  const inputRef   = useRef<HTMLInputElement>(null)
-  const debounceRef= useRef<ReturnType<typeof setTimeout>>()
+  const searchRef = useRef<HTMLDivElement>(null)
+  const inputRef  = useRef<HTMLInputElement>(null)
+  const debRef    = useRef<ReturnType<typeof setTimeout>>()
 
-  // Scroll shadow
+  // Close everything on route change — this is the key fix
+  useEffect(() => {
+    setDrawer(false)
+    setSearchOpen(false)
+    setUserMenu(false)
+    setShowSug(false)
+  }, [location.pathname])
+
+  // Lock body scroll when drawer open
+  useEffect(() => {
+    document.body.style.overflow = drawer ? 'hidden' : ''
+    return () => { document.body.style.overflow = '' }
+  }, [drawer])
+
   useEffect(() => {
     const fn = () => setScrolled(window.scrollY > 20)
     window.addEventListener('scroll', fn)
     return () => window.removeEventListener('scroll', fn)
   }, [])
 
-  // Close menu on route change
-  useEffect(() => { setMenuOpen(false) }, [location.pathname])
-
-  // Close suggestions on outside click
   useEffect(() => {
     const fn = (e: MouseEvent) => {
-      if (searchRef.current && !searchRef.current.contains(e.target as Node)) {
-        setShowSug(false)
-        setActiveSug(-1)
-      }
+      if (searchRef.current && !searchRef.current.contains(e.target as Node)) setShowSug(false)
     }
     document.addEventListener('mousedown', fn)
     return () => document.removeEventListener('mousedown', fn)
   }, [])
 
-  // Debounced search suggestions
   useEffect(() => {
-    clearTimeout(debounceRef.current)
-    if (!query.trim() || query.length < 2) {
-      setSuggestions([])
-      setShowSug(false)
-      return
-    }
+    clearTimeout(debRef.current)
+    if (!query.trim() || query.length < 2) { setSuggestions([]); setShowSug(false); return }
     setSugLoading(true)
-    debounceRef.current = setTimeout(async () => {
+    debRef.current = setTimeout(async () => {
       try {
-        const { data } = await axios.get(`/api/movies/search`, {
-          params: { query: query.trim(), type: 'multi', page: 1 }
-        })
-        const results = (data.results || [])
-          .filter((r: Suggestion) => r.media_type !== 'person' && (r.title || r.name))
-          .slice(0, 8)
-        setSuggestions(results)
+        const { data } = await axios.get('/api/movies/search', { params: { query: query.trim(), type: 'multi', page: 1 } })
+        setSuggestions((data.results || []).filter((r: Suggestion) => r.media_type !== 'person' && (r.title || r.name)).slice(0, 6))
         setShowSug(true)
-      } catch {
-        setSuggestions([])
-      } finally {
-        setSugLoading(false)
-      }
-    }, 280)
+      } catch { setSuggestions([]) }
+      finally { setSugLoading(false) }
+    }, 300)
   }, [query])
 
   const goTo = (item: Suggestion) => {
-    const path = item.media_type === 'tv' ? `/tv/${item.id}` : `/movie/${item.id}`
-    navigate(path)
-    setQuery('')
-    setShowSug(false)
-    setSuggestions([])
-    setActiveSug(-1)
+    navigate(item.media_type === 'tv' ? `/tv/${item.id}` : `/movie/${item.id}`)
+    setQuery(''); setShowSug(false); setSuggestions([])
   }
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSearch = (e: React.FormEvent) => {
     e.preventDefault()
-    if (activeSug >= 0 && suggestions[activeSug]) {
-      goTo(suggestions[activeSug])
-    } else if (query.trim()) {
+    if (query.trim()) {
       navigate(`/search?q=${encodeURIComponent(query.trim())}`)
-      setQuery('')
-      setShowSug(false)
+      setQuery(''); setShowSug(false); setSearchOpen(false)
     }
   }
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (!showSug || suggestions.length === 0) return
-    if (e.key === 'ArrowDown') {
-      e.preventDefault()
-      setActiveSug(i => Math.min(i + 1, suggestions.length - 1))
-    } else if (e.key === 'ArrowUp') {
-      e.preventDefault()
-      setActiveSug(i => Math.max(i - 1, -1))
-    } else if (e.key === 'Escape') {
-      setShowSug(false)
-      setActiveSug(-1)
-    }
-  }
-
-  const year = (d?: string) => d?.slice(0, 4) ?? ''
+  const navLinks = [
+    { to: '/',          label: 'Movies',    icon: '🎬' },
+    { to: '/tv',        label: 'TV Shows',  icon: '📺' },
+    { to: '/anime',     label: 'Anime',     icon: '🎌' },
+    { to: '/watchlist', label: 'Watchlist', icon: '📌' },
+  ]
 
   return (
-    <nav className={`fixed top-0 left-0 right-0 z-50 transition-all duration-300 ${scrolled ? 'bg-dark/98 shadow-lg' : 'bg-gradient-to-b from-dark/90 to-transparent'}`}>
-      <div className="max-w-7xl mx-auto px-4 h-14 flex items-center gap-4">
-        <Link to="/" className="text-brand font-black text-xl tracking-tight flex-shrink-0">STREAMIX</Link>
+    <>
+      {/* ── Navbar bar ───────────────────────────────────────── */}
+      <nav className={`fixed top-0 left-0 right-0 z-50 transition-all duration-300 ${scrolled ? 'bg-dark/98 shadow-lg' : 'bg-gradient-to-b from-dark/95 to-transparent'}`}>
+        <div className="h-14 px-4 flex items-center gap-2">
 
-        {/* Nav links */}
-        <div className="hidden md:flex gap-5 flex-1">
-          {[['/', 'Movies'], ['/tv', 'TV Shows'], ['/anime', 'Anime'], ['/watchlist', 'Watchlist']].map(([to, label]) => (
-            <Link key={to} to={to}
-              className={`text-sm transition-colors ${location.pathname === to ? 'text-white font-semibold' : 'text-slate-400 hover:text-white'}`}>
-              {label}
-            </Link>
-          ))}
-        </div>
+          <Link to="/" className="text-brand font-black text-xl tracking-tight flex-shrink-0">STREAMIX</Link>
 
-        {/* Search with suggestions */}
-        <div ref={searchRef} className="relative flex-1 max-w-sm">
-          <form onSubmit={handleSubmit}>
-            <div className="flex items-center gap-2 bg-dark-surface border border-dark-border rounded-full px-3 py-1.5 focus-within:border-brand/60 transition-colors">
-              {sugLoading
-                ? <div className="w-3 h-3 border border-slate-500 border-t-brand rounded-full animate-spin flex-shrink-0" />
-                : <span className="text-slate-500 text-xs flex-shrink-0">⌕</span>
-              }
-              <input
-                ref={inputRef}
-                value={query}
-                onChange={e => setQuery(e.target.value)}
-                onKeyDown={handleKeyDown}
-                onFocus={() => suggestions.length > 0 && setShowSug(true)}
-                placeholder="Search movies, shows, anime..."
-                className="bg-transparent outline-none text-sm text-white placeholder-slate-500 w-full"
-              />
-              {query && (
-                <button type="button" onClick={() => { setQuery(''); setSuggestions([]); setShowSug(false); inputRef.current?.focus() }}
-                  className="text-slate-500 hover:text-white text-xs flex-shrink-0 transition-colors">✕</button>
-              )}
-            </div>
-          </form>
+          {/* Desktop links */}
+          <div className="hidden md:flex gap-5 flex-1 ml-2">
+            {navLinks.map(({ to, label }) => (
+              <Link key={to} to={to} className={`text-sm transition-colors ${location.pathname === to ? 'text-white font-semibold' : 'text-slate-400 hover:text-white'}`}>{label}</Link>
+            ))}
+          </div>
 
-          {/* Suggestions dropdown */}
-          {showSug && suggestions.length > 0 && (
-            <div className="absolute top-full left-0 right-0 mt-2 bg-dark-surface border border-dark-border rounded-xl shadow-2xl overflow-hidden z-50">
-              {suggestions.map((item, i) => {
-                const title  = item.title || item.name || ''
-                const date   = item.release_date || item.first_air_date || ''
-                const isTV   = item.media_type === 'tv'
-                const active = i === activeSug
-                return (
+          {/* Desktop search */}
+          <div ref={searchRef} className="hidden md:block relative flex-1 max-w-sm">
+            <form onSubmit={handleSearch}>
+              <div className="flex items-center gap-2 bg-dark-surface border border-dark-border rounded-full px-3 py-1.5 focus-within:border-brand/60 transition-colors">
+                {sugLoading ? <div className="w-3 h-3 border border-slate-500 border-t-brand rounded-full animate-spin flex-shrink-0" /> : <span className="text-slate-500 text-xs">⌕</span>}
+                <input value={query} onChange={e => setQuery(e.target.value)} onFocus={() => suggestions.length > 0 && setShowSug(true)}
+                  placeholder="Search..." className="bg-transparent outline-none text-sm text-white placeholder-slate-500 w-full" />
+                {query && <button type="button" onClick={() => { setQuery(''); setSuggestions([]); setShowSug(false) }} className="text-slate-500 text-xs">✕</button>}
+              </div>
+            </form>
+            {showSug && suggestions.length > 0 && (
+              <div className="absolute top-full left-0 right-0 mt-2 bg-dark-surface border border-dark-border rounded-xl shadow-2xl overflow-hidden z-50">
+                {suggestions.map((item, i) => (
                   <button key={item.id} onMouseDown={() => goTo(item)}
-                    className={`w-full flex items-center gap-3 px-3 py-2.5 text-left transition-colors ${active ? 'bg-brand/10' : 'hover:bg-dark-card'} ${i < suggestions.length - 1 ? 'border-b border-dark-border/50' : ''}`}>
-                    {/* Poster thumbnail */}
-                    {item.poster_path ? (
-                      <img src={IMG + item.poster_path} alt="" className="w-8 h-12 object-cover rounded flex-shrink-0 bg-dark-card" />
-                    ) : (
-                      <div className="w-8 h-12 rounded bg-dark-card flex-shrink-0 flex items-center justify-center text-slate-600 text-xs">?</div>
-                    )}
-                    {/* Info */}
+                    className={`w-full flex items-center gap-3 px-3 py-2.5 text-left hover:bg-dark-card ${i < suggestions.length - 1 ? 'border-b border-dark-border/50' : ''}`}>
+                    {item.poster_path ? <img src={IMG + item.poster_path} alt="" className="w-8 h-12 object-cover rounded flex-shrink-0" /> : <div className="w-8 h-12 rounded bg-dark-card flex-shrink-0" />}
                     <div className="flex-1 min-w-0">
-                      <div className="text-sm font-semibold text-slate-100 truncate">{title}</div>
-                      <div className="flex items-center gap-2 mt-0.5">
-                        <span className={`text-xs px-1.5 py-0.5 rounded font-semibold ${isTV ? 'bg-blue-500/15 text-blue-400' : 'bg-brand/15 text-brand'}`}>
-                          {isTV ? 'TV' : 'Movie'}
-                        </span>
-                        {date && <span className="text-xs text-slate-500">{year(date)}</span>}
+                      <div className="text-sm font-semibold text-white truncate">{item.title || item.name}</div>
+                      <div className="flex gap-1.5 items-center mt-0.5">
+                        <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${item.media_type === 'tv' ? 'bg-blue-500/15 text-blue-400' : 'bg-brand/15 text-brand'}`}>{item.media_type === 'tv' ? 'TV' : 'Movie'}</span>
+                        {(item.release_date || item.first_air_date) && <span className="text-xs text-slate-500">{(item.release_date || item.first_air_date)!.slice(0,4)}</span>}
                         {item.vote_average ? <span className="text-xs text-yellow-400">★ {item.vote_average.toFixed(1)}</span> : null}
                       </div>
                     </div>
-                    <span className="text-slate-600 text-xs flex-shrink-0">→</span>
                   </button>
-                )
-              })}
-              {/* View all results */}
-              <button onMouseDown={() => { navigate(`/search?q=${encodeURIComponent(query)}`); setShowSug(false); setQuery('') }}
-                className="w-full px-3 py-2.5 text-xs text-brand hover:bg-dark-card transition-colors text-center font-semibold border-t border-dark-border">
-                View all results for "{query}" →
-              </button>
-            </div>
-          )}
+                ))}
+                <button onMouseDown={() => { navigate(`/search?q=${encodeURIComponent(query)}`); setShowSug(false); setQuery('') }}
+                  className="w-full px-3 py-2.5 text-xs text-brand hover:bg-dark-card text-center font-semibold border-t border-dark-border">
+                  See all results →
+                </button>
+              </div>
+            )}
+          </div>
 
-          {/* No results state */}
-          {showSug && !sugLoading && query.length >= 2 && suggestions.length === 0 && (
-            <div className="absolute top-full left-0 right-0 mt-2 bg-dark-surface border border-dark-border rounded-xl shadow-2xl p-4 text-center z-50">
-              <p className="text-sm text-slate-500">No results for "{query}"</p>
-            </div>
-          )}
+          <div className="flex items-center gap-1 ml-auto">
+            {/* Mobile search button */}
+            <button onClick={() => { setSearchOpen(s => !s) }}
+              className="md:hidden w-10 h-10 flex items-center justify-center text-slate-300 hover:text-white active:bg-dark-card rounded-xl">
+              {searchOpen
+                ? <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M18 6 6 18M6 6l12 12"/></svg>
+                : <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+              }
+            </button>
+
+            {/* Desktop user */}
+            {user ? (
+              <div className="relative hidden md:block">
+                <button onClick={() => setUserMenu(!userMenu)}
+                  className="flex items-center gap-2 bg-dark-card border border-dark-border rounded-full px-3 py-1.5 hover:border-brand transition-colors">
+                  <div className="w-6 h-6 rounded-full bg-brand/20 flex items-center justify-center text-brand font-bold text-xs">{user.username[0].toUpperCase()}</div>
+                  <span className="text-slate-300 text-xs">{user.username}</span>
+                </button>
+                {userMenu && (
+                  <div className="absolute right-0 mt-2 w-44 bg-dark-surface border border-dark-border rounded-xl shadow-xl overflow-hidden z-50">
+                    <Link to="/profile"   className="block px-4 py-2.5 text-sm text-slate-300 hover:bg-dark-card">Profile</Link>
+                    <Link to="/watchlist" className="block px-4 py-2.5 text-sm text-slate-300 hover:bg-dark-card">Watchlist</Link>
+                    {user.isAdmin && <Link to="/admin" className="block px-4 py-2.5 text-sm text-brand hover:bg-dark-card">Admin</Link>}
+                    <div className="border-t border-dark-border" />
+                    <button onClick={() => { logout(); navigate('/') }} className="block w-full text-left px-4 py-2.5 text-sm text-red-400 hover:bg-dark-card">Sign Out</button>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="hidden md:flex gap-2">
+                <Link to="/login"    className="btn-ghost text-xs px-3 py-1.5">Sign In</Link>
+                <Link to="/register" className="btn-primary text-xs px-3 py-1.5">Sign Up</Link>
+              </div>
+            )}
+
+            {/* Mobile hamburger */}
+            <button onClick={() => setDrawer(d => !d)}
+              className="md:hidden w-10 h-10 flex items-center justify-center text-slate-300 hover:text-white active:bg-dark-card rounded-xl">
+              {drawer
+                ? <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M18 6 6 18M6 6l12 12"/></svg>
+                : <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 12h18M3 6h18M3 18h18"/></svg>
+              }
+            </button>
+          </div>
         </div>
 
-        {/* Auth */}
-        <div className="flex items-center gap-2">
+        {/* Mobile search panel */}
+        {searchOpen && (
+          <div className="md:hidden bg-dark/98 border-b border-dark-border px-4 pb-3">
+            <form onSubmit={handleSearch}>
+              <div className="flex items-center gap-3 bg-dark-surface border border-dark-border rounded-xl px-4 py-3">
+                {sugLoading ? <div className="w-4 h-4 border border-slate-500 border-t-brand rounded-full animate-spin flex-shrink-0" /> : <span className="text-slate-400 text-base">⌕</span>}
+                <input ref={inputRef} value={query} onChange={e => setQuery(e.target.value)} autoFocus
+                  placeholder="Search movies, shows, anime..."
+                  className="bg-transparent outline-none text-base text-white placeholder-slate-500 flex-1" />
+                {query && <button type="button" onClick={() => { setQuery(''); setSuggestions([]) }} className="text-slate-400 text-base">✕</button>}
+              </div>
+            </form>
+            {showSug && suggestions.length > 0 && (
+              <div className="mt-2 bg-dark-surface border border-dark-border rounded-xl overflow-hidden">
+                {suggestions.map((item, i) => (
+                  <button key={item.id} onMouseDown={() => { goTo(item); setSearchOpen(false) }}
+                    className={`w-full flex items-center gap-3 px-4 py-3 text-left active:bg-dark-card ${i < suggestions.length - 1 ? 'border-b border-dark-border/50' : ''}`}>
+                    {item.poster_path ? <img src={IMG + item.poster_path} alt="" className="w-9 h-[54px] object-cover rounded flex-shrink-0" /> : <div className="w-9 h-[54px] rounded bg-dark-card flex-shrink-0" />}
+                    <div className="flex-1 min-w-0">
+                      <div className="text-sm font-semibold text-white truncate">{item.title || item.name}</div>
+                      <span className={`inline-block mt-0.5 text-xs px-2 py-0.5 rounded-full font-medium ${item.media_type === 'tv' ? 'bg-blue-500/15 text-blue-400' : 'bg-brand/15 text-brand'}`}>
+                        {item.media_type === 'tv' ? 'TV Show' : 'Movie'}
+                      </span>
+                    </div>
+                  </button>
+                ))}
+                <button onMouseDown={() => { navigate(`/search?q=${encodeURIComponent(query)}`); setShowSug(false); setQuery(''); setSearchOpen(false) }}
+                  className="w-full px-4 py-3 text-sm text-brand text-center font-semibold border-t border-dark-border active:bg-dark-card">
+                  See all results for "{query}" →
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+      </nav>
+
+      {/* ── Drawer backdrop ─────────────────────────────────── */}
+      <div
+        className={`md:hidden fixed inset-0 z-[60] bg-black/70 transition-opacity duration-300 ${drawer ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'}`}
+        onClick={() => setDrawer(false)}
+      />
+
+      {/* ── Drawer panel ────────────────────────────────────── */}
+      <div className={`md:hidden fixed top-0 right-0 h-full w-72 max-w-[82vw] bg-[#0d1117] z-[70] transform transition-transform duration-300 ease-in-out ${drawer ? 'translate-x-0' : 'translate-x-full'} flex flex-col`}>
+
+        {/* Header */}
+        <div className="flex items-center justify-between px-5 h-14 border-b border-dark-border flex-shrink-0">
+          <span className="text-brand font-black text-lg tracking-tight">Menu</span>
+          <button onClick={() => setDrawer(false)} className="w-9 h-9 flex items-center justify-center text-slate-400 hover:text-white active:bg-dark-card rounded-xl">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M18 6 6 18M6 6l12 12"/></svg>
+          </button>
+        </div>
+
+        {/* Scrollable content */}
+        <div className="flex-1 overflow-y-auto">
+
+          {/* User info / auth */}
           {user ? (
-            <div className="relative">
-              <button onClick={() => setMenuOpen(!menuOpen)}
-                className="flex items-center gap-2 bg-dark-card border border-dark-border rounded-full px-3 py-1.5 text-sm hover:border-brand transition-colors">
-                <div className="w-6 h-6 rounded-full bg-brand/20 flex items-center justify-center text-brand font-bold text-xs">
+            <div className="px-5 py-4 border-b border-dark-border bg-dark-card/40">
+              <div className="flex items-center gap-3">
+                <div className="w-11 h-11 rounded-full bg-brand/20 flex items-center justify-center text-brand font-black text-xl flex-shrink-0">
                   {user.username[0].toUpperCase()}
                 </div>
-                <span className="hidden sm:inline text-slate-300 text-xs">{user.username}</span>
-              </button>
-              {menuOpen && (
-                <div className="absolute right-0 mt-2 w-44 bg-dark-surface border border-dark-border rounded-xl shadow-xl overflow-hidden z-50">
-                  <Link to="/profile"   className="block px-4 py-2.5 text-sm text-slate-300 hover:bg-dark-card hover:text-white">Profile</Link>
-                  <Link to="/watchlist" className="block px-4 py-2.5 text-sm text-slate-300 hover:bg-dark-card hover:text-white">My Watchlist</Link>
-                  <Link to="/anime"     className="block px-4 py-2.5 text-sm text-slate-300 hover:bg-dark-card hover:text-white">Anime</Link>
-                  {user.isAdmin && <Link to="/admin" className="block px-4 py-2.5 text-sm text-brand hover:bg-dark-card">Admin Panel</Link>}
-                  <div className="border-t border-dark-border" />
-                  <button onClick={() => { logout(); navigate('/') }} className="block w-full text-left px-4 py-2.5 text-sm text-red-400 hover:bg-dark-card">Sign Out</button>
+                <div>
+                  <div className="text-sm font-bold text-white">{user.username}</div>
+                  <div className="text-xs text-slate-400 mt-0.5">{user.isAdmin ? '👑 Admin' : 'Member'}</div>
                 </div>
-              )}
+              </div>
             </div>
           ) : (
-            <div className="flex gap-2">
-              <Link to="/login"    className="btn-ghost text-xs px-3 py-1.5">Sign In</Link>
-              <Link to="/register" className="btn-primary text-xs px-3 py-1.5">Sign Up</Link>
+            <div className="px-5 py-4 border-b border-dark-border flex gap-3">
+              <Link to="/login"    onClick={() => setDrawer(false)} className="btn-ghost text-sm flex-1 text-center py-2.5">Sign In</Link>
+              <Link to="/register" onClick={() => setDrawer(false)} className="btn-primary text-sm flex-1 text-center py-2.5">Sign Up</Link>
+            </div>
+          )}
+
+          {/* Navigation links */}
+          <div className="py-2">
+            <p className="px-5 pt-2 pb-1 text-xs font-semibold text-slate-500 uppercase tracking-wider">Browse</p>
+            {navLinks.map(({ to, label, icon }) => (
+              <Link
+                key={to}
+                to={to}
+                onClick={() => setDrawer(false)}
+                className={`flex items-center gap-4 px-5 py-3.5 text-[15px] transition-colors active:bg-dark-card/80 ${
+                  location.pathname === to
+                    ? 'text-brand font-semibold bg-brand/5 border-r-2 border-brand'
+                    : 'text-slate-200 hover:bg-dark-card/60'
+                }`}>
+                <span className="text-xl w-7 text-center flex-shrink-0">{icon}</span>
+                <span>{label}</span>
+                {location.pathname === to && <span className="ml-auto w-2 h-2 rounded-full bg-brand" />}
+              </Link>
+            ))}
+          </div>
+
+          {/* Account links */}
+          {user && (
+            <div className="py-2 border-t border-dark-border">
+              <p className="px-5 pt-2 pb-1 text-xs font-semibold text-slate-500 uppercase tracking-wider">Account</p>
+              <Link to="/profile" onClick={() => setDrawer(false)}
+                className="flex items-center gap-4 px-5 py-3.5 text-[15px] text-slate-200 hover:bg-dark-card/60 active:bg-dark-card/80 transition-colors">
+                <span className="text-xl w-7 text-center flex-shrink-0">👤</span> Profile
+              </Link>
+              {user.isAdmin && (
+                <Link to="/admin" onClick={() => setDrawer(false)}
+                  className="flex items-center gap-4 px-5 py-3.5 text-[15px] text-brand hover:bg-dark-card/60 active:bg-dark-card/80 transition-colors">
+                  <span className="text-xl w-7 text-center flex-shrink-0">👑</span> Admin Panel
+                </Link>
+              )}
+              <button onClick={() => { logout(); navigate('/'); setDrawer(false) }}
+                className="flex items-center gap-4 px-5 py-3.5 text-[15px] text-red-400 hover:bg-dark-card/60 active:bg-dark-card/80 transition-colors w-full text-left">
+                <span className="text-xl w-7 text-center flex-shrink-0">🚪</span> Sign Out
+              </button>
             </div>
           )}
         </div>
       </div>
-    </nav>
+    </>
   )
 }

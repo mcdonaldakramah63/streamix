@@ -1,93 +1,155 @@
-import { useRef, useState, useEffect } from 'react'
+// frontend/src/components/VideoPlayer.tsx — FULL REPLACEMENT
+import { useState, useRef, useEffect } from 'react'
 
 interface Props {
-  src?: string
-  tmdbId?: number
-  type?: 'movie' | 'tv'
-  season?: number
+  tmdbId:   number
+  imdbId?:  string
+  type:     'movie' | 'tv'
+  season?:  number
   episode?: number
 }
 
-export default function VideoPlayer({ src, tmdbId, type = 'movie', season = 1, episode = 1 }: Props) {
-  const containerRef = useRef<HTMLDivElement>(null)
-  const iframeRef    = useRef<HTMLIFrameElement>(null)
-  const [isFS, setIsFS] = useState(false)
+interface Source { label: string; url: string }
 
-  // Track fullscreen state changes (e.g. user presses Escape)
+function buildSources(
+  type: 'movie' | 'tv',
+  tmdbId: number,
+  imdbId: string | undefined,
+  season: number,
+  episode: number
+): Source[] {
+  if (type === 'tv') {
+    return [
+      { label: 'VidSrc',       url: `https://vidsrc.to/embed/tv/${tmdbId}/${season}/${episode}` },
+      { label: 'VidSrc 2',     url: `https://vidsrc.me/embed/tv?tmdb=${tmdbId}&season=${season}&episode=${episode}` },
+      { label: 'VidSrc 3',     url: `https://vidsrc.xyz/embed/tv?tmdb=${tmdbId}&season=${season}&episode=${episode}` },
+      { label: 'Embed.su',     url: `https://embed.su/embed/tv/${tmdbId}/${season}/${episode}` },
+      { label: 'AutoEmbed',    url: `https://autoembed.co/tv/tmdb/${tmdbId}-${season}-${episode}` },
+      { label: 'MultiEmbed',   url: `https://multiembed.mov/directstream.php?video_id=${tmdbId}&tmdb=1&s=${season}&e=${episode}` },
+      ...(imdbId ? [{ label: 'MultiEmbed 2', url: `https://multiembed.mov/?video_id=${imdbId}&s=${season}&e=${episode}` }] : []),
+      { label: '2Embed',       url: `https://www.2embed.cc/embedtv/${tmdbId}&s=${season}&e=${episode}` },
+    ]
+  }
+  return [
+    { label: 'VidSrc',       url: `https://vidsrc.to/embed/movie/${tmdbId}` },
+    { label: 'VidSrc 2',     url: `https://vidsrc.me/embed/movie?tmdb=${tmdbId}` },
+    { label: 'VidSrc 3',     url: `https://vidsrc.xyz/embed/movie?tmdb=${tmdbId}` },
+    { label: 'Embed.su',     url: `https://embed.su/embed/movie/${tmdbId}` },
+    { label: 'AutoEmbed',    url: `https://autoembed.co/movie/tmdb/${tmdbId}` },
+    { label: 'MultiEmbed',   url: `https://multiembed.mov/directstream.php?video_id=${tmdbId}&tmdb=1` },
+    ...(imdbId ? [{ label: 'MultiEmbed 2', url: `https://multiembed.mov/?video_id=${imdbId}` }] : []),
+    { label: '2Embed',       url: `https://www.2embed.cc/embed/${tmdbId}` },
+  ]
+}
+
+export default function VideoPlayer({ tmdbId, imdbId, type, season = 1, episode = 1 }: Props) {
+  const sources = buildSources(type, tmdbId, imdbId, season, episode)
+
+  const [activeIdx,    setActiveIdx]    = useState(0)
+  const [isLoading,    setIsLoading]    = useState(true)
+  const [isFullscreen, setIsFullscreen] = useState(false)
+
+  // We fullscreen the iframe itself — pure video, nothing else
+  const iframeRef = useRef<HTMLIFrameElement>(null)
+  const timerRef  = useRef<ReturnType<typeof setTimeout>>()
+
+  // Reset on content change
+  useEffect(() => { setActiveIdx(0); setIsLoading(true) }, [tmdbId, season, episode])
+
+  // Clear loading spinner after 7s
   useEffect(() => {
-    const onChange = () => setIsFS(!!document.fullscreenElement)
-    document.addEventListener('fullscreenchange', onChange)
-    return () => document.removeEventListener('fullscreenchange', onChange)
+    setIsLoading(true)
+    clearTimeout(timerRef.current)
+    timerRef.current = setTimeout(() => setIsLoading(false), 7000)
+    return () => clearTimeout(timerRef.current)
+  }, [activeIdx, tmdbId, season, episode])
+
+  // Track fullscreen state
+  useEffect(() => {
+    const fn = () => setIsFullscreen(!!document.fullscreenElement)
+    document.addEventListener('fullscreenchange', fn)
+    return () => document.removeEventListener('fullscreenchange', fn)
   }, [])
 
+  // Fullscreen on the IFRAME only — pure video, no UI around it
   const toggleFullscreen = async () => {
     try {
-      if (!document.fullscreenElement) {
-        await containerRef.current?.requestFullscreen()
-      } else {
+      if (document.fullscreenElement) {
         await document.exitFullscreen()
+      } else {
+        // Try iframe first, fall back to its parent div
+        const el = iframeRef.current as any
+        if (el?.requestFullscreen)          await el.requestFullscreen()
+        else if (el?.webkitRequestFullscreen) el.webkitRequestFullscreen()
+        else if (el?.mozRequestFullScreen)    el.mozRequestFullScreen()
       }
-    } catch (e) {
-      // Fallback: try on the iframe itself
-      try {
-        if (!document.fullscreenElement) {
-          await iframeRef.current?.requestFullscreen()
-        }
-      } catch {}
-    }
-  }
-
-  const url = src || (tmdbId
-    ? type === 'tv'
-      ? `https://multiembed.mov/directstream.php?video_id=${tmdbId}&tmdb=1&s=${season}&e=${episode}`
-      : `https://multiembed.mov/directstream.php?video_id=${tmdbId}&tmdb=1`
-    : '')
-
-  if (!url) {
-    return (
-      <div className="w-full aspect-video bg-dark-surface flex flex-col items-center justify-center gap-3 text-slate-500 rounded-xl">
-        <div className="text-4xl">📽</div>
-        <p className="text-sm">No stream available — try another server</p>
-      </div>
-    )
+    } catch {}
   }
 
   return (
-    <div
-      ref={containerRef}
-      className="relative w-full bg-black group"
-      style={{ aspectRatio: isFS ? undefined : '16/9', height: isFS ? '100vh' : undefined }}
-    >
-      <iframe
-        key={url}
-        ref={iframeRef}
-        src={url}
-        className="w-full h-full"
-        allowFullScreen
-        allow="autoplay; encrypted-media; picture-in-picture; fullscreen"
-        frameBorder="0"
-        title="Video Player"
-        referrerPolicy="no-referrer"
-      />
+    <div className="bg-black w-full flex flex-col">
 
-      {/* Custom fullscreen button overlay — bottom-right corner */}
-      <button
-        onClick={toggleFullscreen}
-        title={isFS ? 'Exit fullscreen' : 'Fullscreen'}
-        className="absolute bottom-3 right-3 z-20 w-9 h-9 rounded-lg bg-black/70 border border-white/10 flex items-center justify-center text-white opacity-0 group-hover:opacity-100 transition-opacity hover:bg-brand hover:border-brand"
-      >
-        {isFS ? (
-          // Compress icon
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <path d="M8 3v3a2 2 0 0 1-2 2H3m18 0h-3a2 2 0 0 1-2-2V3m0 18v-3a2 2 0 0 1 2-2h3M3 16h3a2 2 0 0 1 2 2v3"/>
-          </svg>
-        ) : (
-          // Expand icon
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/>
-          </svg>
+      {/* ── Video iframe — completely clean, nothing overlaid ── */}
+      <div className="relative w-full bg-black" style={{ aspectRatio: '16/9' }}>
+
+        <iframe
+          ref={iframeRef}
+          key={`${activeIdx}-${tmdbId}-${season}-${episode}`}
+          src={sources[activeIdx].url}
+          className="absolute inset-0 w-full h-full border-0"
+          allowFullScreen
+          allow="autoplay; encrypted-media; picture-in-picture; fullscreen"
+          referrerPolicy="no-referrer"
+          title="Video Player"
+        />
+
+        {/* Loading spinner — pointer-events-none, never blocks iframe */}
+        {isLoading && (
+          <div className="absolute inset-0 bg-black/80 flex flex-col items-center justify-center pointer-events-none z-10">
+            <div className="w-10 h-10 border-2 border-slate-700 border-t-brand rounded-full animate-spin mb-3" />
+            <p className="text-sm text-slate-400">{sources[activeIdx].label}</p>
+            {activeIdx > 0 && (
+              <p className="text-xs text-slate-600 mt-1">Source {activeIdx + 1} / {sources.length}</p>
+            )}
+          </div>
         )}
-      </button>
+      </div>
+
+      {/* ── Controls bar — below the video, never shown in fullscreen ── */}
+      <div className="flex items-center gap-2 px-3 py-2 bg-[#0d1117] border-t border-white/5 flex-wrap">
+
+        <span className="text-xs text-slate-500 flex-shrink-0">Server:</span>
+
+        {/* Source buttons */}
+        <div className="flex gap-1.5 flex-wrap flex-1 min-w-0">
+          {sources.map((s, i) => (
+            <button
+              key={i}
+              onClick={() => setActiveIdx(i)}
+              className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all active:scale-95 whitespace-nowrap ${
+                activeIdx === i
+                  ? 'bg-brand text-dark'
+                  : 'bg-dark-card border border-dark-border text-slate-400 hover:border-brand hover:text-white'
+              }`}>
+              {s.label}
+            </button>
+          ))}
+        </div>
+
+        {/* Fullscreen button */}
+        <button
+          onClick={toggleFullscreen}
+          title="Fullscreen"
+          className="flex-shrink-0 w-8 h-8 rounded-lg bg-dark-card border border-dark-border flex items-center justify-center text-slate-400 hover:text-white hover:border-brand transition-colors active:scale-95">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+            <path d="M8 3H5a2 2 0 0 0-2 2v3"/>
+            <path d="M21 8V5a2 2 0 0 0-2-2h-3"/>
+            <path d="M3 16v3a2 2 0 0 0 2 2h3"/>
+            <path d="M16 21h3a2 2 0 0 0 2-2v-3"/>
+          </svg>
+        </button>
+
+      </div>
     </div>
   )
 }
