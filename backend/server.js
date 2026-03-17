@@ -10,6 +10,7 @@ const rateLimit       = require('express-rate-limit')
 const connectDB       = require('./config/db')
 const suspiciousDetector = require('./middleware/suspiciousDetector')
 const { ipBlocker }   = require('./middleware/ipBlocker')
+const streamRoutes = require('./routes/stream')
 
 dotenv.config()
 
@@ -69,6 +70,7 @@ app.use('/api/watchlist', require('./routes/watchlist'))
 app.use('/api/admin',     require('./routes/admin'))
 app.use('/api/download',  require('./routes/download'))
 app.use('/api/anime',     require('./routes/anime'))
+app.use('/api/stream', streamRoutes)
 
 app.get('/', (req, res) => res.json({ message: 'Streamix API', env: process.env.NODE_ENV }))
 

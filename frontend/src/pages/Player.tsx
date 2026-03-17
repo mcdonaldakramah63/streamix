@@ -4,84 +4,59 @@ import { useParams, useSearchParams, useNavigate } from 'react-router-dom'
 import { Movie, Episode } from '../types'
 import { fetchMovieDetails, fetchTVDetails, fetchSeason } from '../services/api'
 import { poster, rating, year, runtime } from '../services/tmdb'
-import VideoPlayer   from '../components/VideoPlayer'
+import HLSPlayer     from '../components/HLSPlayer'
+import VideoPlayer   from '../components/VideoPlayer'   // iframe fallback
 import DownloadLinks from '../components/DownloadLinks'
-import { useContinueWatching } from '../stores/continueWatchingStore'
-
-const TYPICAL_MOVIE_MINS = 110
-const TYPICAL_EP_MINS    = 45
+import { useContinueWatching }  from '../stores/continueWatchingStore'
+import { useConsumet, HLSSource } from '../hooks/useConsumet'
 
 export default function Player() {
   const { type, id }          = useParams<{ type: string; id: string }>()
   const [searchParams, setSearchParams] = useSearchParams()
   const navigate = useNavigate()
-  const { save } = useContinueWatching()
 
   const season  = Number(searchParams.get('season')  || 1)
   const episode = Number(searchParams.get('episode') || 1)
 
-  const [media,       setMedia]       = useState<Movie | null>(null)
-  const [episodes,    setEpisodes]    = useState<Episode[]>([])
-  const [curEp,       setCurEp]       = useState<Episode | null>(null)
-  const [showDL,      setShowDL]      = useState(false)
-  const [sidebarOpen, setSidebarOpen] = useState(false)
-  const [loading,     setLoading]     = useState(true)
+  const { save, saveTimestamp, get: getCW } = useContinueWatching()
+  const { findAnimeStream, findMovieStream, loading: consumetLoading } = useConsumet()
 
-  const startRef  = useRef(Date.now())
-  const mediaRef  = useRef<Movie | null>(null)
-  const curEpRef  = useRef<Episode | null>(null)
-  const savedRef  = useRef<string>('')   // tracks last saved key to avoid duplicates
-  const timerRef  = useRef<ReturnType<typeof setInterval>>()
+  const [media,        setMedia]        = useState<Movie | null>(null)
+  const [episodes,     setEpisodes]     = useState<Episode[]>([])
+  const [curEp,        setCurEp]        = useState<Episode | null>(null)
+  const [showDL,       setShowDL]       = useState(false)
+  const [sidebarOpen,  setSidebarOpen]  = useState(false)
+  const [mediaLoading, setMediaLoading] = useState(true)
+
+  // Stream state
+  const [hlsSources,   setHlsSources]   = useState<HLSSource[] | null>(null)
+  const [subtitles,    setSubtitles]    = useState<any[]>([])
+  const [streamMode,   setStreamMode]   = useState<'searching' | 'hls' | 'iframe'>('searching')
+  const [startAt,      setStartAt]      = useState(0)
+
+  const mediaRef   = useRef<Movie | null>(null)
+  const curEpRef   = useRef<Episode | null>(null)
+  const savedRef   = useRef('')
+  const tsTimerRef = useRef<ReturnType<typeof setInterval>>()
+  const currentTs  = useRef(0)
+  const currentDur = useRef(0)
 
   useEffect(() => { mediaRef.current = media }, [media])
   useEffect(() => { curEpRef.current = curEp  }, [curEp])
 
-  // ── Build and fire a save ────────────────────────────────────────────
-  const doSave = useCallback((progress: number) => {
-    const m  = mediaRef.current
-    const ep = curEpRef.current
-    if (!m || !id) return
-
-    const durationMins = type === 'tv'
-      ? (ep?.runtime || (m as any)?.episode_run_time?.[0] || TYPICAL_EP_MINS)
-      : (m.runtime   || TYPICAL_MOVIE_MINS)
-
-    save({
-      movieId:     Number(id),
-      title:       m.title || m.name || '',
-      poster:      m.poster_path   || '',
-      backdrop:    m.backdrop_path || '',
-      type:        type as 'movie' | 'tv',
-      season:      type === 'tv' ? season  : undefined,
-      episode:     type === 'tv' ? episode : undefined,
-      episodeName: ep?.name || undefined,
-      progress:    Math.max(0, Math.min(progress, 99)),
-      durationMins,
-    })
-  }, [id, type, season, episode, save])
-
-  const calcProgress = useCallback((): number => {
-    const m  = mediaRef.current
-    const ep = curEpRef.current
-    const elapsed = (Date.now() - startRef.current) / 60_000
-    const total   = type === 'tv'
-      ? (ep?.runtime || (m as any)?.episode_run_time?.[0] || TYPICAL_EP_MINS)
-      : (m?.runtime  || TYPICAL_MOVIE_MINS)
-    return Math.min(Math.round((elapsed / total) * 100), 99)
-  }, [type])
-
-  // ── Fetch media ──────────────────────────────────────────────────────
+  // ── Fetch media ────────────────────────────────────────────────────────────
   useEffect(() => {
     window.scrollTo(0, 0)
-    startRef.current = Date.now()
     savedRef.current = ''
-    setLoading(true)
+    setMediaLoading(true)
+    setStreamMode('searching')
+    setHlsSources(null)
     ;(type === 'tv' ? fetchTVDetails : fetchMovieDetails)(Number(id))
       .then(r => setMedia(r.data))
-      .finally(() => setLoading(false))
+      .finally(() => setMediaLoading(false))
   }, [id, type])
 
-  // ── Fetch episodes ───────────────────────────────────────────────────
+  // ── Fetch episodes ─────────────────────────────────────────────────────────
   useEffect(() => {
     if (type !== 'tv') return
     fetchSeason(Number(id), season).then(r => {
@@ -94,38 +69,122 @@ export default function Player() {
   useEffect(() => {
     if (!episodes.length) return
     setCurEp(episodes.find(e => e.episode_number === episode) ?? null)
-    startRef.current = Date.now()   // reset timer when episode changes
   }, [episode, episodes])
 
-  // ── Save on ready ────────────────────────────────────────────────────
+  // ── Find stream once media + episode are ready ─────────────────────────────
   useEffect(() => {
     if (!media) return
-    // Build a key so we only save once per media+episode combo
+    const title = media.title || media.name || ''
+    if (!title) return
+
     const key = type === 'tv' ? `${id}-s${season}e${episode}` : String(id)
     if (savedRef.current === key) return
     savedRef.current = key
-    doSave(0)   // save with 0% immediately so it appears in CW right away
-  }, [media, curEp])
 
-  // ── Auto-save every 30s + save on unmount ────────────────────────────
-  useEffect(() => {
-    timerRef.current = setInterval(() => doSave(calcProgress()), 30_000)
-    return () => {
-      clearInterval(timerRef.current)
-      doSave(calcProgress())
+    // Get resume timestamp from CW store
+    const cwEntry = getCW(Number(id))
+    const resumeAt = cwEntry?.timestamp || 0
+
+    const tryStream = async () => {
+      setStreamMode('searching')
+      let result = null
+
+      // Determine if this is anime (use Zoro) or movie/tv (use Flixhx)
+      const isAnime = type === 'tv' && (
+        (media as any)?.genres?.some((g: any) => g.id === 16) ||    // Animation genre
+        (media as any)?.origin_country?.includes('JP') ||            // Japanese
+        (media as any)?.original_language === 'ja'
+      )
+
+      try {
+        if (isAnime) {
+          result = await findAnimeStream(title, season, episode, Number(id))
+        } else {
+          result = await findMovieStream(title, type as 'movie' | 'tv', season, episode)
+        }
+      } catch { result = null }
+
+      if (result && result.sources.length > 0) {
+        setHlsSources(result.sources)
+        setSubtitles(result.subtitles)
+        setStartAt(resumeAt)
+        setStreamMode('hls')
+        // Register in CW
+        doSave(0, resumeAt)
+      } else {
+        // Fall back to iframe sources
+        setStreamMode('iframe')
+        doSave(0, 0)
+      }
     }
-  }, [doSave, calcProgress])
 
-  // ─────────────────────────────────────────────────────────────────────
-  const imdbId = media?.external_ids?.imdb_id
+    tryStream()
+  }, [media, curEp, season, episode])
+
+  // ── Save CW entry ──────────────────────────────────────────────────────────
+  const doSave = useCallback((progress: number, timestamp: number) => {
+    const m  = mediaRef.current
+    const ep = curEpRef.current
+    if (!m || !id) return
+
+    const durationMins = type === 'tv'
+      ? (ep?.runtime || (m as any)?.episode_run_time?.[0] || 45)
+      : (m.runtime   || 110)
+
+    save({
+      movieId:     Number(id),
+      title:       m.title || m.name || '',
+      poster:      m.poster_path   || '',
+      backdrop:    m.backdrop_path || '',
+      type:        type as 'movie' | 'tv',
+      season:      type === 'tv' ? season  : undefined,
+      episode:     type === 'tv' ? episode : undefined,
+      episodeName: ep?.name || undefined,
+      progress,
+      timestamp,
+      duration:    currentDur.current || undefined,
+      durationMins,
+    })
+  }, [id, type, season, episode, save])
+
+  // ── Handle time updates from HLS player (saves every 10s) ─────────────────
+  const handleTimeUpdate = useCallback((time: number, duration: number) => {
+    currentTs.current  = time
+    currentDur.current = duration
+  }, [])
+
+  // Auto-save timestamp every 10 seconds
+  useEffect(() => {
+    tsTimerRef.current = setInterval(() => {
+      if (currentTs.current > 2) {
+        saveTimestamp(Number(id), currentTs.current, currentDur.current || undefined)
+      }
+    }, 10_000)
+    return () => {
+      clearInterval(tsTimerRef.current)
+      // Final save on unmount
+      if (currentTs.current > 2) {
+        saveTimestamp(Number(id), currentTs.current, currentDur.current || undefined)
+      }
+    }
+  }, [id, saveTimestamp])
+
+  // ─────────────────────────────────────────────────────────────────────────
   const title  = media?.title || media?.name || ''
+  const imdbId = media?.external_ids?.imdb_id
 
   const goEpisode = (ep: number, s = season) => {
+    savedRef.current = ''   // allow re-finding stream for new episode
     setSearchParams({ season: String(s), episode: String(ep) })
   }
 
   const prevEp = episodes.find(e => e.episode_number === episode - 1)
   const nextEp = episodes.find(e => e.episode_number === episode + 1)
+
+  // Pick best m3u8 source (prefer 1080p, fallback to auto)
+  const bestSource = hlsSources?.find(s => s.quality === '1080p') ||
+                     hlsSources?.find(s => s.quality === '720p')  ||
+                     hlsSources?.[0]
 
   return (
     <div className="pt-14 min-h-screen bg-black">
@@ -137,9 +196,14 @@ export default function Player() {
           <div className="flex-1 min-w-0">
             <p className="font-bold text-white text-sm sm:text-base truncate">{title}</p>
             {type === 'tv' && (
-              <p className="text-brand text-xs">
-                Season {season} · Episode {episode}{curEp ? ` — ${curEp.name}` : ''}
+              <p className="text-xs flex items-center gap-2">
+                <span className="text-brand">Season {season} · Episode {episode}{curEp ? ` — ${curEp.name}` : ''}</span>
+                {streamMode === 'hls' && <span className="text-emerald-400 text-xs">● HLS</span>}
+                {streamMode === 'iframe' && <span className="text-yellow-400 text-xs">● Embed</span>}
               </p>
+            )}
+            {type === 'movie' && streamMode === 'hls' && (
+              <p className="text-xs text-emerald-400">● Direct stream — quality selector available</p>
             )}
           </div>
           <div className="flex items-center gap-1.5 flex-shrink-0">
@@ -156,16 +220,28 @@ export default function Player() {
           </div>
         </div>
 
-        {/* Player + sidebar */}
         <div className={`flex flex-col ${type === 'tv' && sidebarOpen ? 'lg:flex-row' : ''} gap-0 sm:gap-4 px-0 sm:px-4`}>
           <div className={type === 'tv' && sidebarOpen ? 'flex-1 min-w-0' : 'w-full'}>
 
-            {/* Video */}
+            {/* ── Player ── */}
             <div className="rounded-none sm:rounded-xl overflow-hidden border-y sm:border border-dark-border">
-              {loading ? (
-                <div className="aspect-video flex items-center justify-center bg-dark-surface">
+              {mediaLoading || streamMode === 'searching' ? (
+                <div className="aspect-video flex flex-col items-center justify-center bg-dark-surface gap-3">
                   <div className="w-10 h-10 border-2 border-dark-border border-t-brand rounded-full animate-spin" />
+                  <p className="text-sm text-slate-400">
+                    {streamMode === 'searching' ? 'Finding best stream…' : 'Loading…'}
+                  </p>
                 </div>
+              ) : streamMode === 'hls' && bestSource ? (
+                <HLSPlayer
+                  key={`${id}-${season}-${episode}`}
+                  src={bestSource.url}
+                  poster={media?.backdrop_path ? `https://image.tmdb.org/t/p/w1280${media.backdrop_path}` : undefined}
+                  startAt={startAt}
+                  subtitles={subtitles}
+                  onTimeUpdate={handleTimeUpdate}
+                  onEnded={() => nextEp && goEpisode(nextEp.episode_number)}
+                />
               ) : (
                 <VideoPlayer
                   tmdbId={Number(id)}
@@ -192,14 +268,12 @@ export default function Player() {
               </div>
             )}
 
-            {/* Downloads */}
             {showDL && (
               <div className="mt-3 px-3 sm:px-0">
                 <DownloadLinks title={title} imdbId={imdbId} tmdbId={Number(id)} type={type as 'movie' | 'tv'} season={season} episode={episode} />
               </div>
             )}
 
-            {/* Media info */}
             {media && (
               <div className="mt-3 mx-3 sm:mx-0 flex gap-3 bg-dark-surface border border-dark-border rounded-xl p-3 sm:p-4 mb-4">
                 <img src={poster(media.poster_path)} alt="" className="w-14 sm:w-20 rounded-lg hidden sm:block flex-shrink-0" />
@@ -209,6 +283,7 @@ export default function Player() {
                     <span className="text-yellow-400 font-bold">★ {rating(media.vote_average)}</span>
                     <span>{year(media.release_date || media.first_air_date)}</span>
                     {media.runtime && <span>{runtime(media.runtime)}</span>}
+                    {streamMode === 'hls' && <span className="text-emerald-400 font-semibold">✓ Direct stream</span>}
                   </div>
                   <p className="text-xs text-slate-500 leading-relaxed line-clamp-3">{curEp?.overview || media.overview}</p>
                 </div>
