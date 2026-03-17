@@ -18,7 +18,7 @@ exports.searchAnime = async (req, res) => {
     const { q } = req.query
     if (!q) return res.status(400).json({ message: 'Query required' })
 
-    const { data } = await api.get(`/anime/zoro/${encodeURIComponent(q)}`)
+    const { data } = await api.get(`/anime/hianime/${encodeURIComponent(q)}`)
     res.json(data)
   } catch (err) {
     console.error('[Stream] searchAnime:', err.message)
@@ -32,7 +32,7 @@ exports.getAnimeInfo = async (req, res) => {
     const { id } = req.query
     if (!id) return res.status(400).json({ message: 'ID required' })
 
-    const { data } = await api.get(`/anime/zoro/info?id=${encodeURIComponent(id)}`)
+    const { data } = await api.get(`/anime/hianime/info?id=${encodeURIComponent(id)}`)
     res.json(data)
   } catch (err) {
     console.error('[Stream] getAnimeInfo:', err.message)
@@ -63,7 +63,7 @@ exports.matchAnimeByTitle = async (req, res) => {
     const { title } = req.query
     if (!title) return res.status(400).json({ message: 'title required' })
 
-    const { data } = await api.get(`/anime/zoro/${encodeURIComponent(title)}`)
+    const { data } = await api.get(`/anime/hianime/${encodeURIComponent(title)}`)
     const results  = data?.results || []
     // Return top 5 matches for the frontend to pick best
     res.json({ results: results.slice(0, 5) })
