@@ -1,4 +1,4 @@
-// frontend/src/hooks/useConsumet.ts — NEW FILE
+// frontend/src/hooks/useConsumet.ts — FULL REPLACEMENT
 import { useState, useCallback } from 'react'
 import api from '../services/api'
 
@@ -11,117 +11,107 @@ export interface HLSSource {
 export interface StreamResult {
   sources:   HLSSource[]
   subtitles: { url: string; lang: string; label: string }[]
-  provider:  'consumet' | 'iframe'
+  provider:  'hls' | 'iframe'
+}
+
+// Wrap a raw m3u8 URL through our backend proxy to fix CORS
+function proxyUrl(rawUrl: string): string {
+  if (!rawUrl) return rawUrl
+  const base = import.meta.env.VITE_API_URL?.replace('/api', '') || 'https://streamix-usak.onrender.com'
+  return `${base}/api/stream/proxy?url=${encodeURIComponent(rawUrl)}`
 }
 
 export function useConsumet() {
-  const [loading,  setLoading]  = useState(false)
-  const [error,    setError]    = useState<string | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [error,   setError]   = useState<string | null>(null)
 
-  // ── Find anime stream by TMDB id + title ─────────────────────────────────
   const findAnimeStream = useCallback(async (
-    title: string,
-    season: number,
-    episode: number,
-    tmdbId: number
+    title:   string,
+    season:  number,
+    episode: number
   ): Promise<StreamResult | null> => {
     setLoading(true)
     setError(null)
-    try {
-      // 1. Search for the anime on Zoro
-      const searchRes = await api.get('/stream/anime/match', { params: { title } })
-      const matches   = searchRes.data?.results || []
-      if (!matches.length) return null
 
-      // 2. Pick best match (first result usually best for exact title search)
-      const zoroId = matches[0].id
-
-      // 3. Get episode list
-      const infoRes  = await api.get('/stream/anime/info', { params: { id: zoroId } })
-      const episodes = infoRes.data?.episodes || []
-
-      // 4. Find the right episode
-      // For season > 1, try to offset (Zoro lists all eps sequentially for most shows)
-      let targetEp = episodes.find((e: any) => e.number === episode)
-      if (!targetEp && episodes.length > 0) {
-        // fallback: try by index
-        targetEp = episodes[episode - 1]
-      }
-      if (!targetEp) return null
-
-      // 5. Get stream URL
-      const watchRes = await api.get('/stream/anime/watch', { params: { episodeId: targetEp.id } })
-      const sources  = (watchRes.data?.sources || []) as HLSSource[]
-      const subs     = (watchRes.data?.subtitles || []).map((s: any) => ({
-        url:   s.url,
-        lang:  s.lang || 'en',
-        label: s.label || s.lang || 'English',
-      }))
-
-      const m3u8Sources = sources.filter(s => s.isM3U8 || s.url?.includes('.m3u8'))
-      if (!m3u8Sources.length) return null
-
-      return { sources: m3u8Sources, subtitles: subs, provider: 'consumet' }
-    } catch (err: any) {
-      console.warn('[Consumet] anime stream failed:', err.message)
-      setError(err.message)
-      return null
-    } finally {
-      setLoading(false)
-    }
-  }, [])
-
-  // ── Find movie/TV stream ──────────────────────────────────────────────────
-  const findMovieStream = useCallback(async (
-    title: string,
-    type: 'movie' | 'tv',
-    season?: number,
-    episode?: number
-  ): Promise<StreamResult | null> => {
-    setLoading(true)
-    setError(null)
     try {
       // 1. Search
-      const searchRes = await api.get('/stream/movie/search', { params: { q: title, type } })
-      const matches   = searchRes.data?.results || []
-      if (!matches.length) return null
-
-      const match = matches[0]
-
-      // 2. Get info (needed for episodeId)
-      const infoRes = await api.get('/stream/movie/info', {
-        params: { id: match.id, provider: 'flixhx' }
+      const searchRes = await api.get('/stream/anime/search', {
+        params: { q: title, page: 1 },
       })
-
-      let episodeId = match.id
-      if (type === 'tv' && season && episode) {
-        const seasons  = infoRes.data?.seasons || []
-        const foundSeason = seasons.find((s: any) => s.season === season || s.number === season)
-        if (foundSeason) {
-          const eps = foundSeason.episodes || []
-          const ep  = eps.find((e: any) => e.episode === episode || e.number === episode)
-          if (ep) episodeId = ep.id
-        }
+      const animes = searchRes.data?.animes || []
+      if (!animes.length) {
+        console.log('[Consumet] No results for:', title)
+        return null
       }
 
-      // 3. Get stream
-      const watchRes = await api.get('/stream/movie/watch', {
-        params: { episodeId, mediaId: match.id, provider: 'flixhx' }
-      })
+      // Best match: exact name first, else first result
+      const titleLower = title.toLowerCase()
+      const best = animes.find(
+        (a: any) => a.name?.toLowerCase() === titleLower ||
+                    a.jname?.toLowerCase() === titleLower
+      ) || animes[0]
 
-      const sources = (watchRes.data?.sources || []) as HLSSource[]
-      const subs    = (watchRes.data?.subtitles || []).map((s: any) => ({
-        url:   s.url,
-        lang:  s.lang || 'en',
-        label: s.label || s.lang || 'English',
-      }))
+      console.log('[Consumet] Match:', best.name, '| id:', best.id)
 
-      const m3u8Sources = sources.filter(s => s.isM3U8 || s.url?.includes('.m3u8'))
-      if (!m3u8Sources.length) return null
+      // 2. Get episodes
+      const epsRes   = await api.get('/stream/anime/episodes', { params: { id: best.id } })
+      const episodes = epsRes.data?.episodes || []
+      if (!episodes.length) return null
 
-      return { sources: m3u8Sources, subtitles: subs, provider: 'consumet' }
+      // 3. Find target episode
+      let target = episodes.find((e: any) => e.number === episode)
+      if (!target) target = episodes[episode - 1] || episodes[0]
+      if (!target) return null
+
+      console.log('[Consumet] Episode:', target.number, '| episodeId:', target.episodeId)
+
+      // 4. Get stream — try sub then dub
+      let watchData: any = null
+      for (const category of ['sub', 'dub']) {
+        try {
+          const r = await api.get('/stream/anime/watch', {
+            params: { id: target.episodeId, server: 'hd-1', category },
+          })
+          if (r.data?.sources?.length) {
+            watchData = r.data
+            console.log(`[Consumet] Got ${category} sources:`, r.data.sources.length)
+            break
+          }
+        } catch { continue }
+      }
+
+      if (!watchData?.sources?.length) {
+        console.log('[Consumet] No sources returned')
+        return null
+      }
+
+      // 5. Proxy all m3u8 URLs through backend to fix CORS
+      const sources: HLSSource[] = (watchData.sources as any[])
+        .filter(s => s.isM3U8 || s.url?.includes('.m3u8'))
+        .map(s => ({
+          url:     proxyUrl(s.url),   // ← key fix: route through our proxy
+          quality: s.quality || 'Auto',
+          isM3U8:  true,
+        }))
+
+      if (!sources.length) {
+        console.log('[Consumet] No m3u8 sources after filter')
+        return null
+      }
+
+      // 6. Subtitles
+      const subtitles = (watchData.tracks || [])
+        .filter((t: any) => t.kind === 'captions' || t.kind === 'subtitles')
+        .map((t: any) => ({
+          url:   t.file,
+          lang:  t.label?.toLowerCase().includes('english') ? 'en' : (t.label || 'en'),
+          label: t.label || 'English',
+        }))
+
+      return { sources, subtitles, provider: 'hls' }
+
     } catch (err: any) {
-      console.warn('[Consumet] movie stream failed:', err.message)
+      console.warn('[Consumet] Failed:', err?.response?.status, err.message)
       setError(err.message)
       return null
     } finally {
@@ -129,5 +119,5 @@ export function useConsumet() {
     }
   }, [])
 
-  return { findAnimeStream, findMovieStream, loading, error }
+  return { findAnimeStream, loading, error }
 }
