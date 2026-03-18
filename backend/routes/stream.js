@@ -1,30 +1,22 @@
-// backend/routes/stream.js — NEW FILE
+// backend/routes/stream.js — FULL REPLACEMENT
 const express = require('express')
 const router  = express.Router()
 const { protect } = require('../middleware/auth')
 const {
   searchAnime,
   getAnimeInfo,
+  getAnimeEpisodes,
   watchAnime,
-  matchAnimeByTitle,
-  searchMovie,
-  getMovieInfo,
-  watchMovie,
   saveTimestamp,
 } = require('../controllers/streamController')
 
 // Anime
-router.get('/anime/search',   searchAnime)
-router.get('/anime/info',     getAnimeInfo)
-router.get('/anime/watch',    watchAnime)
-router.get('/anime/match',    matchAnimeByTitle)
-
-// Movies / TV
-router.get('/movie/search',   searchMovie)
-router.get('/movie/info',     getMovieInfo)
-router.get('/movie/watch',    watchMovie)
+router.get('/anime/search',    searchAnime)
+router.get('/anime/info',      getAnimeInfo)
+router.get('/anime/episodes',  getAnimeEpisodes)
+router.get('/anime/watch',     watchAnime)
 
 // Timestamp (auth required)
-router.post('/timestamp',     protect, saveTimestamp)
+router.post('/timestamp', protect, saveTimestamp)
 
 module.exports = router
