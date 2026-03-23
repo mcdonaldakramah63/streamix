@@ -10,7 +10,7 @@ const rateLimit       = require('express-rate-limit')
 const connectDB       = require('./config/db')
 const suspiciousDetector = require('./middleware/suspiciousDetector')
 const { ipBlocker }   = require('./middleware/ipBlocker')
-const streamRoutes = require('./routes/stream')
+const streamRoutes    = require('./routes/stream')
 
 dotenv.config()
 
@@ -34,15 +34,12 @@ app.use(helmet({ contentSecurityPolicy: false, crossOriginEmbedderPolicy: false 
 app.use(helmet.referrerPolicy({ policy: 'strict-origin-when-cross-origin' }))
 
 // ── CORS ─────────────────────────────────────────────────────────
-const cors = require('cors')
-
 const allowedOrigins = process.env.ALLOWED_ORIGINS
   ? process.env.ALLOWED_ORIGINS.split(',')
   : ['http://localhost:5173']
 
 app.use(cors({
   origin: (origin, callback) => {
-    // Allow requests with no origin (mobile apps, curl, Postman)
     if (!origin) return callback(null, true)
     if (allowedOrigins.includes('*') || allowedOrigins.includes(origin)) {
       callback(null, true)
@@ -58,30 +55,29 @@ app.use(cors({
 // Handle preflight for all routes
 app.options('*', cors())
 
-// ── Body parser (10kb limit prevents payload attacks) ────────────
+// ── Body parser ──────────────────────────────────────────────────
 app.use(express.json({ limit: '10kb' }))
 app.use(express.urlencoded({ extended: true, limit: '10kb' }))
 
 // ── Data sanitization ────────────────────────────────────────────
-app.use(mongoSanitize())   // NoSQL injection
-app.use(xssClean())        // XSS
-app.use(hpp())             // HTTP parameter pollution
+app.use(mongoSanitize())
+app.use(xssClean())
+app.use(hpp())
 
 // ── Request logging ──────────────────────────────────────────────
 app.use(morgan(process.env.NODE_ENV === 'development' ? 'dev' : 'combined'))
 
-// ── IP blocker (runs before rate limiter) ────────────────────────
+// ── IP blocker ───────────────────────────────────────────────────
 app.use(ipBlocker)
 
 // ── Suspicious request detector ──────────────────────────────────
 app.use(suspiciousDetector)
 
 // ── Rate limiters ────────────────────────────────────────────────
-app.use('/api/', rateLimit({ windowMs: 15*60*1000, max: 300, standardHeaders: true, legacyHeaders: false }))
-app.use('/api/auth', rateLimit({ windowMs: 15*60*1000, max: 10, skipSuccessfulRequests: true,
-  message: { message: 'Too many attempts, wait 15 minutes.' } }))
-app.use('/api/movies', rateLimit({ windowMs: 60*1000, max: 60 }))
-app.use('/api/anime',  rateLimit({ windowMs: 60*1000, max: 60 }))
+app.use('/api/',       rateLimit({ windowMs: 15*60*1000, max: 300, standardHeaders: true, legacyHeaders: false }))
+app.use('/api/auth',   rateLimit({ windowMs: 15*60*1000, max: 10,  skipSuccessfulRequests: true, message: { message: 'Too many attempts, wait 15 minutes.' } }))
+app.use('/api/movies', rateLimit({ windowMs: 60*1000,    max: 60 }))
+app.use('/api/anime',  rateLimit({ windowMs: 60*1000,    max: 60 }))
 
 // ── Routes ───────────────────────────────────────────────────────
 app.use('/api/auth',      require('./routes/auth'))
@@ -91,7 +87,8 @@ app.use('/api/watchlist', require('./routes/watchlist'))
 app.use('/api/admin',     require('./routes/admin'))
 app.use('/api/download',  require('./routes/download'))
 app.use('/api/anime',     require('./routes/anime'))
-app.use('/api/stream', streamRoutes)
+app.use('/api/stream',    streamRoutes)
+app.use('/api/ratings',   require('./routes/ratings'))
 
 app.get('/', (req, res) => res.json({ message: 'Streamix API', env: process.env.NODE_ENV }))
 
