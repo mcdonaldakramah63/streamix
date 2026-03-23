@@ -1,212 +1,233 @@
+// frontend/src/pages/TVDetail.tsx — FULL REPLACEMENT
 import { useEffect, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { Movie, Episode } from '../types'
-import { fetchTVDetails, fetchSeason } from '../services/api'
-import { backdrop, poster, avatar, rating, year } from '../services/tmdb'
-import { useWatchlistStore } from '../context/watchlistStore'
+import api from '../services/api'
+import { backdrop, poster, rating, year } from '../services/tmdb'
+import TrailerModal from '../components/TrailerModal'
+import CastSection  from '../components/CastSection'
+import SimilarRow   from '../components/SimilarRow'
+import StarRating   from '../components/StarRating'
+import ShareButton  from '../components/ShareButton'
+import { useWatchlistStore } from '../stores/watchlistStore'
 import { useAuthStore } from '../context/authStore'
-import Carousel from '../components/Carousel'
+
+interface Video { key: string; type: string; site: string; official: boolean }
 
 export default function TVDetail() {
-  const { id } = useParams<{ id: string }>()
-  const navigate = useNavigate()
-  const { user } = useAuthStore()
-  const { add, remove, isInList, fetch: fetchWL } = useWatchlistStore()
+  const { id }    = useParams()
+  const navigate  = useNavigate()
+  const { user }  = useAuthStore()
+  const { items: wl, add: addWL, remove: removeWL } = useWatchlistStore()
 
-  const [show, setShow]           = useState<Movie | null>(null)
-  const [episodes, setEpisodes]   = useState<Episode[]>([])
-  const [selSeason, setSelSeason] = useState(1)
-  const [loadingEps, setLoadingEps] = useState(false)
-  const [loading, setLoading]     = useState(true)
-  const [activeTab, setActiveTab] = useState<'episodes' | 'cast' | 'similar'>('episodes')
+  const [show,       setShow]       = useState<any>(null)
+  const [cast,       setCast]       = useState<any[]>([])
+  const [videos,     setVideos]     = useState<Video[]>([])
+  const [ratingData, setRatingData] = useState({ avgRating: 0, totalRatings: 0, myRating: 0 })
+  const [loading,    setLoading]    = useState(true)
+  const [trailerKey, setTrailerKey] = useState<string | null>(null)
+  const [selSeason,  setSelSeason]  = useState(1)
+  const [wlLoading,  setWlLoading]  = useState(false)
+
+  const inWL = wl.some(w => w.movieId === Number(id))
 
   useEffect(() => {
     window.scrollTo(0, 0)
     setLoading(true)
-    fetchTVDetails(Number(id))
-      .then(r => {
-        setShow(r.data)
-        loadSeason(1)
-      })
-      .finally(() => setLoading(false))
-    if (user) fetchWL()
+    Promise.all([
+      api.get(`/movies/tv/${id}`),
+      api.get(`/movies/tv/${id}/credits`),
+      api.get(`/movies/tv/${id}/videos`),
+      api.get(`/ratings/${id}?type=tv`).catch(() => ({ data: { avgRating: 0, totalRatings: 0, myRating: 0 } })),
+    ]).then(([s, c, v, r]) => {
+      setShow(s.data)
+      setCast(c.data.cast || [])
+      setVideos(v.data.results || [])
+      setRatingData(r.data)
+      setSelSeason(1)
+    }).finally(() => setLoading(false))
   }, [id])
 
-  const loadSeason = async (s: number) => {
-    setSelSeason(s)
-    setLoadingEps(true)
+  const trailer = videos.find(v => v.type === 'Trailer' && v.site === 'YouTube' && v.official)
+               || videos.find(v => v.type === 'Trailer' && v.site === 'YouTube')
+
+  const toggleWL = async () => {
+    if (!user || wlLoading || !show) return
+    setWlLoading(true)
     try {
-      const r = await fetchSeason(Number(id), s)
-      setEpisodes(r.data.episodes ?? [])
-    } finally {
-      setLoadingEps(false)
-    }
+      if (inWL) {
+        await removeWL(Number(id))
+      } else {
+        await addWL({
+          movieId:  Number(id),
+          title:    show.name,
+          poster:   show.poster_path || '',
+          backdrop: show.backdrop_path || '',
+          rating:   show.vote_average || 0,
+          year:     year(show.first_air_date),
+        })
+      }
+    } finally { setWlLoading(false) }
   }
 
-  if (loading) return (
-    <div className="pt-14">
-      <div className="w-full h-[400px] bg-dark-surface animate-pulse" />
-      <div className="max-w-6xl mx-auto px-4 py-8 space-y-4">
-        {[300, 200, 500].map(w => <div key={w} className="h-4 bg-dark-card rounded animate-pulse" style={{ width: w }} />)}
+  if (loading) {
+    return (
+      <div className="pt-14 min-h-screen">
+        <div className="h-[250px] sm:h-[400px] bg-dark-surface animate-pulse" />
+        <div className="max-w-5xl mx-auto px-4 py-6 space-y-4">
+          <div className="h-8 bg-dark-card animate-pulse rounded w-1/2" />
+          <div className="h-4 bg-dark-card animate-pulse rounded w-1/3" />
+          <div className="h-20 bg-dark-card animate-pulse rounded" />
+        </div>
       </div>
-    </div>
+    )
+  }
+
+  if (!show) return (
+    <div className="pt-14 min-h-screen flex items-center justify-center text-slate-500">Show not found</div>
   )
 
-  if (!show) return <div className="pt-20 text-center text-slate-400">Show not found</div>
-
-  const inWL = isInList(show.id)
-  const validSeasons = (show.seasons ?? []).filter(s => s.season_number > 0)
-  const airDate = show.first_air_date
-  const imdbId = show.external_ids?.imdb_id
-
-  const handleWatchlist = () => {
-    if (!user) return navigate('/login')
-    if (inWL) remove(show.id)
-    else add({ movieId: show.id, title: show.name || '', poster: show.poster_path ?? '', backdrop: show.backdrop_path ?? '', rating: show.vote_average, year: year(airDate) })
-  }
-
-  const currentEpisode = (ep: Episode) =>
-    navigate(`/player/tv/${show.id}?season=${selSeason}&episode=${ep.episode_number}`)
+  const genres  = (show.genres || []).map((g: any) => g.name).join(' · ')
+  const seasons = (show.seasons || []).filter((s: any) => s.season_number > 0)
+  const selSeasonData = seasons.find((s: any) => s.season_number === selSeason)
 
   return (
-    <div className="pt-14">
-      {/* Backdrop */}
-      <div className="relative h-[420px] overflow-hidden">
-        <img src={backdrop(show.backdrop_path)} alt="" className="w-full h-full object-cover object-top" />
-        <div className="absolute inset-0 bg-dark/50" />
-        <div className="absolute inset-0 bg-gradient-to-t from-dark via-dark/20 to-transparent" />
-        <div className="absolute inset-0 bg-gradient-to-r from-dark/80 to-transparent" />
+    <div className="pt-14 min-h-screen">
+
+      {trailerKey && (
+        <TrailerModal videoKey={trailerKey} title={show.name} onClose={() => setTrailerKey(null)} />
+      )}
+
+      {/* Hero */}
+      <div className="relative h-[250px] sm:h-[420px] overflow-hidden">
+        <img src={backdrop(show.backdrop_path, 'w1280')} alt={show.name} className="w-full h-full object-cover object-top" />
+        <div className="absolute inset-0" style={{ background: 'linear-gradient(to top, rgba(6,9,15,1) 0%, rgba(6,9,15,0.4) 60%, transparent 100%)' }} />
+        <div className="absolute inset-0" style={{ background: 'linear-gradient(to right, rgba(6,9,15,0.8) 0%, transparent 60%)' }} />
+        <button onClick={() => navigate(-1)} className="absolute top-4 left-4 text-white/70 hover:text-white bg-black/40 rounded-xl px-3 py-1.5 text-sm backdrop-blur">
+          ← Back
+        </button>
       </div>
 
-      <div className="max-w-6xl mx-auto px-4 -mt-60 relative z-10">
-        {/* Header */}
-        <div className="flex gap-6 items-end mb-8">
-          <img src={poster(show.poster_path)} alt={show.name} className="w-36 rounded-xl shadow-2xl hidden sm:block flex-shrink-0 border border-white/10" />
-          <div className="flex-1">
-            <div className="flex items-center gap-2 mb-2 flex-wrap">
-              <span className="bg-brand text-dark text-xs font-black px-2.5 py-1 rounded-full uppercase tracking-widest">TV Series</span>
-              {show.number_of_seasons && <span className="text-xs text-slate-400 bg-dark-card border border-dark-border px-2.5 py-1 rounded-full">{show.number_of_seasons} Seasons</span>}
+      {/* Main content */}
+      <div className="max-w-5xl mx-auto px-3 sm:px-6 -mt-16 sm:-mt-24 relative z-10 pb-12">
+        <div className="flex gap-4 sm:gap-6 mb-6">
+
+          {/* Poster */}
+          <div className="flex-shrink-0 hidden sm:block">
+            <img src={poster(show.poster_path)} alt={show.name}
+              className="w-32 sm:w-44 rounded-2xl shadow-2xl ring-1 ring-white/10" />
+          </div>
+
+          {/* Info */}
+          <div className="flex-1 min-w-0 pt-12 sm:pt-16">
+            <h1 className="text-2xl sm:text-4xl font-black leading-tight mb-2">{show.name}</h1>
+
+            {show.tagline && (
+              <p className="text-brand text-sm italic mb-3">"{show.tagline}"</p>
+            )}
+
+            <div className="flex flex-wrap gap-2 items-center mb-2">
+              <span className="text-yellow-400 font-bold">★ {rating(show.vote_average)}</span>
+              <span className="text-slate-400 text-sm">{year(show.first_air_date)}</span>
+              <span className="text-slate-400 text-sm">{seasons.length} Season{seasons.length !== 1 ? 's' : ''}</span>
+              <span className="text-slate-400 text-sm">{show.number_of_episodes} Episodes</span>
+              {show.status && (
+                <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${
+                  show.status === 'Returning Series'
+                    ? 'bg-green-500/20 text-green-400'
+                    : show.status === 'Ended'
+                    ? 'bg-slate-500/20 text-slate-400'
+                    : 'bg-yellow-500/20 text-yellow-400'
+                }`}>{show.status}</span>
+              )}
             </div>
-            <h1 className="text-4xl font-black mb-2 tracking-tight leading-tight">{show.name}</h1>
-            <div className="flex flex-wrap gap-3 items-center text-sm text-slate-400 mb-3">
-              <span className="bg-brand/15 border border-brand/30 text-brand px-2 py-0.5 rounded-full text-xs font-bold">★ {rating(show.vote_average)}</span>
-              <span>{year(airDate)}</span>
-              {show.genres?.slice(0, 3).map(g => (
-                <span key={g.id} className="bg-dark-card border border-dark-border px-2.5 py-0.5 rounded-full text-xs">{g.name}</span>
-              ))}
-            </div>
-            <p className="text-slate-400 text-sm leading-relaxed max-w-2xl mb-5 line-clamp-3">{show.overview}</p>
-            <div className="flex gap-3 flex-wrap">
-              {imdbId && (
-                <button onClick={() => navigate(`/player/tv/${show.id}?season=1&episode=1`)} className="btn-primary flex items-center gap-2">
-                  ▶ Play S1E1
+
+            {genres && <p className="text-slate-500 text-sm mb-3">{genres}</p>}
+
+            {/* Action buttons */}
+            <div className="flex flex-wrap gap-2 mb-4">
+              <button onClick={() => navigate(`/player/tv/${id}?season=1&episode=1`)}
+                className="btn-primary px-5 py-2.5 text-sm flex items-center gap-2">
+                ▶ Play S1E1
+              </button>
+              {trailer && (
+                <button onClick={() => setTrailerKey(trailer.key)}
+                  className="btn-secondary px-4 py-2.5 text-sm">
+                  🎬 Trailer
                 </button>
               )}
-              <button onClick={handleWatchlist} className={`btn-ghost flex items-center gap-2 ${inWL ? 'border-brand text-brand' : ''}`}>
-                {inWL ? '✓ In Watchlist' : '+ Watchlist'}
+              <button onClick={toggleWL} disabled={wlLoading}
+                className={`px-4 py-2.5 text-sm rounded-xl border font-semibold transition-all flex items-center gap-2 ${
+                  inWL ? 'bg-brand/15 border-brand text-brand' : 'bg-dark-card border-dark-border text-slate-300 hover:border-brand'
+                }`}>
+                {wlLoading
+                  ? <div className="w-4 h-4 border border-current border-t-transparent rounded-full animate-spin" />
+                  : inWL ? '✓ Watchlisted' : '+ Watchlist'}
               </button>
+              <ShareButton title={show.name} />
             </div>
+
+            {/* User rating */}
+            <StarRating
+              tmdbId={Number(id)}
+              type="tv"
+              initialRating={ratingData.myRating}
+              avgRating={ratingData.avgRating}
+              totalRatings={ratingData.totalRatings}
+            />
           </div>
         </div>
 
-        {/* Season Selector */}
-        {validSeasons.length > 0 && (
-          <div className="mb-6">
-            <div className="flex items-center gap-3 mb-3 flex-wrap">
-              <h3 className="text-sm font-bold text-slate-300">Season</h3>
-              <div className="flex gap-2 flex-wrap">
-                {validSeasons.map(s => (
-                  <button key={s.id} onClick={() => loadSeason(s.season_number)}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${selSeason === s.season_number ? 'bg-brand text-dark scale-105' : 'bg-dark-card border border-dark-border text-slate-400 hover:border-brand hover:text-white'}`}>
-                    S{s.season_number}
-                    <span className="ml-1.5 text-xs opacity-60">{s.episode_count}</span>
-                  </button>
-                ))}
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Tabs */}
-        <div className="flex gap-1 mb-6 bg-dark-surface border border-dark-border rounded-xl p-1 w-fit">
-          {(['episodes', 'cast', 'similar'] as const).map(t => (
-            <button key={t} onClick={() => setActiveTab(t)}
-              className={`px-4 py-2 rounded-lg text-sm font-semibold capitalize transition-all ${activeTab === t ? 'bg-brand text-dark' : 'text-slate-400 hover:text-white'}`}>
-              {t}
-            </button>
-          ))}
+        {/* Overview */}
+        <div className="bg-dark-surface border border-dark-border rounded-2xl p-4 sm:p-5 mb-6">
+          <h3 className="text-sm font-black uppercase tracking-widest text-slate-500 mb-2">Overview</h3>
+          <p className="text-slate-300 text-sm leading-relaxed">{show.overview || 'No overview available.'}</p>
         </div>
 
-        {/* Episodes Tab */}
-        {activeTab === 'episodes' && (
-          <div className="mb-10">
-            {loadingEps ? (
-              <div className="space-y-3">
-                {Array(6).fill(0).map((_, i) => (
-                  <div key={i} className="h-24 bg-dark-card rounded-xl animate-pulse" />
-                ))}
-              </div>
-            ) : (
-              <div className="space-y-2">
-                {episodes.map(ep => (
-                  <button key={ep.id} onClick={() => currentEpisode(ep)}
-                    className="w-full flex gap-4 items-center bg-dark-surface hover:bg-dark-card border border-dark-border rounded-xl p-3 text-left transition-all group hover:border-brand/40">
-                    {/* Episode Number Badge */}
-                    <div className="w-10 h-10 rounded-lg bg-dark-card border border-dark-border flex items-center justify-center text-xs font-black text-slate-400 group-hover:bg-brand group-hover:text-dark group-hover:border-brand transition-all flex-shrink-0">
-                      {ep.episode_number}
-                    </div>
-                    {/* Still Image */}
-                    {ep.still_path ? (
-                      <img src={`https://image.tmdb.org/t/p/w300${ep.still_path}`} alt=""
-                        className="w-28 aspect-video object-cover rounded-lg flex-shrink-0 bg-dark-card" />
-                    ) : (
-                      <div className="w-28 aspect-video rounded-lg bg-dark-card flex-shrink-0 flex items-center justify-center text-slate-600 text-xs">No Image</div>
-                    )}
-                    {/* Info */}
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 mb-1 flex-wrap">
-                        <span className="text-sm font-bold text-white truncate">{ep.name}</span>
-                        {ep.runtime && <span className="text-xs text-slate-500 flex-shrink-0">{ep.runtime}m</span>}
-                        {ep.air_date && <span className="text-xs text-slate-600 flex-shrink-0">{ep.air_date}</span>}
-                      </div>
-                      <p className="text-xs text-slate-500 line-clamp-2 leading-relaxed">{ep.overview}</p>
-                    </div>
-                    {/* Play icon */}
-                    <div className="w-9 h-9 rounded-full border border-dark-border flex items-center justify-center text-slate-500 group-hover:border-brand group-hover:text-brand transition-all flex-shrink-0">
-                      ▶
-                    </div>
+        {/* Seasons */}
+        {seasons.length > 0 && (
+          <div className="bg-dark-surface border border-dark-border rounded-2xl p-4 sm:p-5 mb-6">
+            <h3 className="text-sm font-black uppercase tracking-widest text-slate-500 mb-3">Seasons</h3>
+            <div className="flex gap-2 flex-wrap mb-4">
+              {seasons.map((s: any) => (
+                <button key={s.season_number} onClick={() => setSelSeason(s.season_number)}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                    selSeason === s.season_number ? 'bg-brand text-dark' : 'bg-dark-card border border-dark-border text-slate-400 hover:text-white'
+                  }`}>
+                  S{s.season_number}
+                </button>
+              ))}
+            </div>
+            {selSeasonData && (
+              <div className="flex gap-3 items-start">
+                {selSeasonData.poster_path && (
+                  <img src={`https://image.tmdb.org/t/p/w154${selSeasonData.poster_path}`} alt=""
+                    className="w-16 rounded-lg flex-shrink-0 hidden sm:block" />
+                )}
+                <div>
+                  <p className="text-white font-bold text-sm mb-0.5">{selSeasonData.name}</p>
+                  <p className="text-slate-500 text-xs mb-2">{selSeasonData.episode_count} episodes · {year(selSeasonData.air_date)}</p>
+                  {selSeasonData.overview && (
+                    <p className="text-slate-400 text-xs leading-relaxed line-clamp-3">{selSeasonData.overview}</p>
+                  )}
+                  <button onClick={() => navigate(`/player/tv/${id}?season=${selSeason}&episode=1`)}
+                    className="mt-3 btn-primary px-4 py-1.5 text-xs">
+                    ▶ Watch Season {selSeason}
                   </button>
-                ))}
+                </div>
               </div>
             )}
           </div>
         )}
 
-        {/* Cast Tab */}
-        {activeTab === 'cast' && show.credits?.cast?.length && (
-          <div className="mb-10">
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
-              {show.credits.cast.slice(0, 20).map(c => (
-                <div key={c.id} className="bg-dark-surface border border-dark-border rounded-xl p-3 flex items-center gap-3">
-                  <img src={avatar(c.profile_path)} alt={c.name}
-                    className="w-12 h-12 rounded-full object-cover bg-dark-card flex-shrink-0"
-                    onError={e => { (e.target as HTMLImageElement).src = `https://ui-avatars.com/api/?name=${encodeURIComponent(c.name)}&background=161b27&color=94a3b8` }} />
-                  <div className="min-w-0">
-                    <div className="text-xs font-bold text-slate-200 truncate">{c.name}</div>
-                    <div className="text-xs text-slate-500 truncate">{c.character}</div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
+        {/* Cast */}
+        <div className="mb-6">
+          <CastSection cast={cast} loading={false} />
+        </div>
 
-        {/* Similar Tab */}
-        {activeTab === 'similar' && show.recommendations?.results?.length && (
-          <div className="mb-10">
-            <Carousel title="Similar Shows" movies={show.recommendations.results} />
-          </div>
-        )}
+        {/* Similar */}
+        <div className="mb-6">
+          <SimilarRow tmdbId={Number(id)} type="tv" />
+        </div>
       </div>
     </div>
   )
