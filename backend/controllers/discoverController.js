@@ -1,85 +1,111 @@
-// backend/controllers/discoverController.js — NEW FILE
+// backend/controllers/discoverController.js — FULL REPLACEMENT
 const axios = require('axios')
 
-const TMDB = 'https://api.themoviedb.org/3'
-const KEY  = () => process.env.TMDB_API_KEY
+const TMDB_KEY = () => process.env.TMDB_API_KEY
+const TMDB_BASE = 'https://api.themoviedb.org/3'
 
-// Simple 5-minute cache
+// 5-minute cache
 const cache = new Map()
-function cacheKey(url) { return url }
-function fromCache(key) {
+function getCache(key) {
   const hit = cache.get(key)
   if (!hit) return null
-  if (Date.now() - hit.ts > 5 * 60 * 1000) { cache.delete(key); return null }
+  if (Date.now() - hit.ts > 300_000) { cache.delete(key); return null }
   return hit.data
 }
-function toCache(key, data) { cache.set(key, { data, ts: Date.now() }) }
+function setCache(key, data) {
+  if (cache.size > 200) cache.clear()
+  cache.set(key, { data, ts: Date.now() })
+}
 
-// ── GET /api/movies/discover ─────────────────────────────────────────────────
-// query params:
-//   type                  = movie | tv  (default: movie)
-//   page                  = 1
-//   sort_by               = popularity.desc
-//   with_genres           = 16,28  (comma-separated genre IDs)
-//   with_original_language= ja
-//   vote_count.gte        = 50
-//   air_date.gte          = 2024-01-01
-//   air_date.lte          = 2024-12-31
+// ── GET /api/movies/discover ──────────────────────────────────────────────────
 exports.discover = async (req, res) => {
   try {
-    const type  = req.query.type  || 'movie'
-    const page  = req.query.page  || 1
-    const sort  = req.query.sort_by || 'popularity.desc'
-
-    const endpoint = type === 'tv'
-      ? `${TMDB}/discover/tv`
-      : `${TMDB}/discover/movie`
-
-    const params = {
-      api_key:  KEY(),
-      page,
-      sort_by:  sort,
-      language: 'en-US',
+    const key = process.env.TMDB_API_KEY
+    if (!key) {
+      console.error('[Discover] TMDB_API_KEY not set!')
+      return res.status(500).json({ message: 'TMDB_API_KEY not configured' })
     }
 
-    if (req.query.with_genres)            params.with_genres             = req.query.with_genres
-    if (req.query.with_original_language) params.with_original_language  = req.query.with_original_language
-    if (req.query['vote_count.gte'])      params['vote_count.gte']       = req.query['vote_count.gte']
-    if (req.query['air_date.gte'])        params['first_air_date.gte']   = req.query['air_date.gte']
-    if (req.query['air_date.lte'])        params['first_air_date.lte']   = req.query['air_date.lte']
+    const type = req.query.type || 'movie'
+    const endpoint = type === 'tv'
+      ? `${TMDB_BASE}/discover/tv`
+      : `${TMDB_BASE}/discover/movie`
 
-    // Add minimum votes for quality when sorting by rating
-    if (sort.includes('vote_average') && !params['vote_count.gte']) {
+    // Build params object manually to avoid dot-key issues
+    const params = {
+      api_key:  key,
+      language: 'en-US',
+      page:     req.query.page     || 1,
+      sort_by:  req.query.sort_by  || 'popularity.desc',
+    }
+
+    // Genre filter
+    if (req.query.with_genres) {
+      params.with_genres = req.query.with_genres
+    }
+
+    // Language filter
+    if (req.query.with_original_language) {
+      params.with_original_language = req.query.with_original_language
+    }
+
+    // Vote count minimum — try multiple param name formats
+    const voteMin = req.query['vote_count.gte'] || req.query.vote_count_gte
+    if (voteMin) {
+      params['vote_count.gte'] = voteMin
+    } else if (params.sort_by && params.sort_by.includes('vote_average')) {
       params['vote_count.gte'] = 100
     }
 
-    const cKey = `${endpoint}?${JSON.stringify(params)}`
-    const cached = fromCache(cKey)
+    // Air date range (TV only)
+    const airFrom = req.query['air_date.gte'] || req.query.air_date_gte
+    const airTo   = req.query['air_date.lte'] || req.query.air_date_lte
+    if (airFrom && type === 'tv') params['first_air_date.gte'] = airFrom
+    if (airTo   && type === 'tv') params['first_air_date.lte'] = airTo
+
+    // Release date range (movies)
+    if (airFrom && type === 'movie') params['release_date.gte'] = airFrom
+    if (airTo   && type === 'movie') params['release_date.lte'] = airTo
+
+    // Adult filter off
+    params.include_adult = false
+
+    const cacheKey = `${endpoint}_${JSON.stringify(params)}`
+    const cached = getCache(cacheKey)
     if (cached) return res.json(cached)
 
-    const { data } = await axios.get(endpoint, { params, timeout: 10000 })
-    toCache(cKey, data)
+    console.log(`[Discover] ${type} sort=${params.sort_by} genres=${params.with_genres || 'all'} lang=${params.with_original_language || 'any'} page=${params.page}`)
+
+    const { data } = await axios.get(endpoint, { params, timeout: 12000 })
+    setCache(cacheKey, data)
     res.json(data)
+
   } catch (err) {
-    console.error('[Discover]', err.message)
-    res.status(500).json({ message: 'Discovery failed', error: err.message })
+    const status = err?.response?.status
+    const msg    = err?.response?.data?.status_message || err.message
+    console.error(`[Discover] TMDB error ${status}:`, msg)
+    res.status(500).json({ message: 'Discovery failed', error: msg, tmdb_status: status })
   }
 }
 
-// ── GET /api/movies/now-playing ──────────────────────────────────────────────
+// ── GET /api/movies/now-playing ───────────────────────────────────────────────
 exports.nowPlaying = async (req, res) => {
   try {
+    const key = process.env.TMDB_API_KEY
+    if (!key) return res.status(500).json({ message: 'TMDB_API_KEY not configured' })
+
     const { page = 1 } = req.query
-    const cKey = `now-playing-${page}`
-    const cached = fromCache(cKey)
+    const cacheKey = `now-playing-${page}`
+    const cached = getCache(cacheKey)
     if (cached) return res.json(cached)
 
-    const { data } = await axios.get(`${TMDB}/movie/now_playing`, {
-      params: { api_key: KEY(), page, language: 'en-US' },
-      timeout: 10000,
+    const { data } = await axios.get(`${TMDB_BASE}/movie/now_playing`, {
+      params: { api_key: key, page, language: 'en-US' },
+      timeout: 12000,
     })
-    toCache(cKey, data)
+    setCache(cacheKey, data)
     res.json(data)
+
   } catch (err) {
     console.error('[NowPlaying]', err.message)
     res.status(500).json({ message: 'Failed', error: err.message })
