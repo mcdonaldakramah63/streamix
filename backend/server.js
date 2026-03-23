@@ -34,8 +34,29 @@ app.use(helmet({ contentSecurityPolicy: false, crossOriginEmbedderPolicy: false 
 app.use(helmet.referrerPolicy({ policy: 'strict-origin-when-cross-origin' }))
 
 // ── CORS ─────────────────────────────────────────────────────────
-const allowed = (process.env.ALLOWED_ORIGINS || 'http://localhost:5173').split(',').map(o => o.trim())
-app.use(cors({ origin: '*', credentials: false }))
+const cors = require('cors')
+
+const allowedOrigins = process.env.ALLOWED_ORIGINS
+  ? process.env.ALLOWED_ORIGINS.split(',')
+  : ['http://localhost:5173']
+
+app.use(cors({
+  origin: (origin, callback) => {
+    // Allow requests with no origin (mobile apps, curl, Postman)
+    if (!origin) return callback(null, true)
+    if (allowedOrigins.includes('*') || allowedOrigins.includes(origin)) {
+      callback(null, true)
+    } else {
+      callback(new Error(`CORS blocked: ${origin}`))
+    }
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+}))
+
+// Handle preflight for all routes
+app.options('*', cors())
 
 // ── Body parser (10kb limit prevents payload attacks) ────────────
 app.use(express.json({ limit: '10kb' }))

@@ -3,9 +3,26 @@ import { secureStorage } from '../utils/secureStorage'
 
 const api = axios.create({
   baseURL: 'https://streamix-production-1cb4.up.railway.app/api',
-  timeout: 15000,
+  timeout: 60000,
   headers: { 'Content-Type': 'application/json' },
 })
+
+// Add this after creating the api instance
+api.interceptors.response.use(
+  response => response,
+  async (error) => {
+    if (error.code === 'ECONNABORTED' || error.message?.includes('timeout')) {
+      // Cold start — retry once with longer wait
+      const config = error.config
+      if (!config._retry) {
+        config._retry   = true
+        config.timeout  = 90000
+        return api(config)
+      }
+    }
+    return Promise.reject(error)
+  }
+)
 
 // Attach JWT token to every request
 api.interceptors.request.use(
