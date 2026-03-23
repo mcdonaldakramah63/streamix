@@ -14,12 +14,32 @@ export interface StreamResult {
   provider:  'hls' | 'iframe'
 }
 
-// Wrap a raw m3u8 URL through our backend proxy to fix CORS
 function proxyUrl(rawUrl: string): string {
   if (!rawUrl) return rawUrl
-  const base = import.meta.env.VITE_API_URL?.replace('/api', '') || 'https://streamix-usak.onrender.com'
+  const base = (import.meta.env.VITE_API_URL || 'https://streamix-production-1cb4.up.railway.app/api')
+    .replace('/api', '')
   return `${base}/api/stream/proxy?url=${encodeURIComponent(rawUrl)}`
 }
+
+// Test if a proxied m3u8 URL actually loads (not 403)
+async function testSource(rawUrl: string): Promise<boolean> {
+  try {
+    const proxied = proxyUrl(rawUrl)
+    const res = await fetch(proxied, { method: 'HEAD' })
+    return res.ok
+  } catch {
+    return false
+  }
+}
+
+const SERVERS = [
+  { server: 'vidstreaming', category: 'sub'  },
+  { server: 'hd-2',        category: 'sub'  },
+  { server: 'hd-1',        category: 'sub'  },
+  { server: 'vidstreaming', category: 'dub'  },
+  { server: 'hd-2',        category: 'dub'  },
+  { server: 'hd-1',        category: 'dub'  },
+]
 
 export function useConsumet() {
   const [loading, setLoading] = useState(false)
@@ -35,23 +55,16 @@ export function useConsumet() {
 
     try {
       // 1. Search
-      const searchRes = await api.get('/stream/anime/search', {
-        params: { q: title, page: 1 },
-      })
-      const animes = searchRes.data?.animes || []
-      if (!animes.length) {
-        console.log('[Consumet] No results for:', title)
-        return null
-      }
+      const searchRes = await api.get('/stream/anime/search', { params: { q: title, page: 1 } })
+      const animes    = searchRes.data?.animes || []
+      if (!animes.length) return null
 
-      // Best match: exact name first, else first result
       const titleLower = title.toLowerCase()
       const best = animes.find(
-        (a: any) => a.name?.toLowerCase() === titleLower ||
-                    a.jname?.toLowerCase() === titleLower
+        (a: any) => a.name?.toLowerCase() === titleLower || a.jname?.toLowerCase() === titleLower
       ) || animes[0]
 
-      console.log('[Consumet] Match:', best.name, '| id:', best.id)
+      console.log('[Anime] Match:', best.name, best.id)
 
       // 2. Get episodes
       const epsRes   = await api.get('/stream/anime/episodes', { params: { id: best.id } })
@@ -63,55 +76,59 @@ export function useConsumet() {
       if (!target) target = episodes[episode - 1] || episodes[0]
       if (!target) return null
 
-      console.log('[Consumet] Episode:', target.number, '| episodeId:', target.episodeId)
+      console.log('[Anime] Episode:', target.number, target.episodeId)
 
-      // 4. Get stream — try sub then dub
-      let watchData: any = null
-      for (const category of ['sub', 'dub']) {
+      // 4. Try each server — test the proxied URL actually loads before returning it
+      for (const { server, category } of SERVERS) {
         try {
           const r = await api.get('/stream/anime/watch', {
-            params: { id: target.episodeId, server: 'hd-1', category },
+            params: { id: target.episodeId, server, category },
           })
-          if (r.data?.sources?.length) {
-            watchData = r.data
-            console.log(`[Consumet] Got ${category} sources:`, r.data.sources.length)
-            break
+
+          const rawSources = (r.data?.sources || []).filter(
+            (s: any) => s.isM3U8 || s.url?.includes('.m3u8')
+          )
+
+          if (!rawSources.length) continue
+
+          // Test if the first source is actually accessible through proxy
+          const firstRaw = rawSources[0].url
+          console.log(`[Anime] Testing ${server}/${category}:`, firstRaw.substring(0, 60))
+
+          const works = await testSource(firstRaw)
+
+          if (!works) {
+            console.log(`[Anime] ${server}/${category} → 403, trying next server`)
+            continue
           }
+
+          console.log(`[Anime] ✅ ${server}/${category} works!`)
+
+          // Proxy all sources
+          const sources: HLSSource[] = rawSources.map((s: any) => ({
+            url:     proxyUrl(s.url),
+            quality: s.quality || 'Auto',
+            isM3U8:  true,
+          }))
+
+          const subtitles = (r.data?.tracks || [])
+            .filter((t: any) => t.kind === 'captions' || t.kind === 'subtitles')
+            .map((t: any) => ({
+              url:   t.file,
+              lang:  t.label?.toLowerCase().includes('english') ? 'en' : (t.label || 'en'),
+              label: t.label || 'English',
+            }))
+
+          return { sources, subtitles, provider: 'hls' }
+
         } catch { continue }
       }
 
-      if (!watchData?.sources?.length) {
-        console.log('[Consumet] No sources returned')
-        return null
-      }
-
-      // 5. Proxy all m3u8 URLs through backend to fix CORS
-      const sources: HLSSource[] = (watchData.sources as any[])
-        .filter(s => s.isM3U8 || s.url?.includes('.m3u8'))
-        .map(s => ({
-          url:     proxyUrl(s.url),   // ← key fix: route through our proxy
-          quality: s.quality || 'Auto',
-          isM3U8:  true,
-        }))
-
-      if (!sources.length) {
-        console.log('[Consumet] No m3u8 sources after filter')
-        return null
-      }
-
-      // 6. Subtitles
-      const subtitles = (watchData.tracks || [])
-        .filter((t: any) => t.kind === 'captions' || t.kind === 'subtitles')
-        .map((t: any) => ({
-          url:   t.file,
-          lang:  t.label?.toLowerCase().includes('english') ? 'en' : (t.label || 'en'),
-          label: t.label || 'English',
-        }))
-
-      return { sources, subtitles, provider: 'hls' }
+      console.log('[Anime] All servers failed or blocked')
+      return null
 
     } catch (err: any) {
-      console.warn('[Consumet] Failed:', err?.response?.status, err.message)
+      console.warn('[Anime] Error:', err.message)
       setError(err.message)
       return null
     } finally {
