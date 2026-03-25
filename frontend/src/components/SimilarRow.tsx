@@ -1,4 +1,4 @@
-// frontend/src/components/SimilarRow.tsx — NEW FILE
+// frontend/src/components/SimilarRow.tsx — FULL REPLACEMENT
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import api from '../services/api'
@@ -11,37 +11,46 @@ interface Props {
 
 const IMG = 'https://image.tmdb.org/t/p/w300'
 
-function Card({ movie, type }: { movie: Movie; type: 'movie' | 'tv' }) {
-  const navigate  = useNavigate()
-  const title     = movie.title || movie.name || ''
-  const imgPath   = movie.poster_path
-  const yr        = (movie.release_date || movie.first_air_date || '').slice(0, 4)
-  const rt        = movie.vote_average?.toFixed(1)
+function SimilarCard({ movie, type }: { movie: Movie; type: 'movie'|'tv' }) {
+  const navigate = useNavigate()
+  const [imgErr, setImgErr] = useState(false)
+  const title = movie.title || movie.name || ''
+  const yr    = (movie.release_date || movie.first_air_date || '').slice(0,4)
+  const rt    = movie.vote_average || 0
 
   return (
     <button
       onClick={() => navigate(type === 'tv' ? `/tv/${movie.id}` : `/movie/${movie.id}`)}
-      className="flex-shrink-0 w-28 sm:w-36 group text-left">
-      <div className="aspect-[2/3] rounded-xl overflow-hidden bg-dark-card mb-2 ring-2 ring-transparent group-hover:ring-brand transition-all">
-        {imgPath ? (
-          <img src={IMG + imgPath} alt={title}
-            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
+      className="flex-shrink-0 w-28 sm:w-36 text-left group"
+      style={{ aspectRatio: '2/3' }}>
+
+      <div className="relative w-full h-full rounded-xl overflow-hidden bg-dark-card">
+        {!imgErr && movie.poster_path ? (
+          <img src={IMG + movie.poster_path} alt={title}
+            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+            onError={() => setImgErr(true)} />
         ) : (
-          <div className="w-full h-full flex items-center justify-center text-3xl bg-dark-surface">🎬</div>
+          <div className="w-full h-full flex items-center justify-center text-4xl bg-dark-surface">🎬</div>
         )}
-      </div>
-      <p className="text-xs font-semibold text-slate-200 truncate group-hover:text-brand transition-colors">{title}</p>
-      <div className="flex items-center gap-1.5 mt-0.5">
-        {rt && rt !== '0.0' && <span className="text-yellow-400 text-xs">★ {rt}</span>}
-        {yr && <span className="text-slate-500 text-xs">{yr}</span>}
+
+        <div className="absolute inset-0 bg-gradient-to-t from-[#07080c]/95 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+
+        {rt >= 7.5 && (
+          <div className="absolute top-1.5 left-1.5 badge-gold text-[10px] px-1.5 py-0.5">★ {rt.toFixed(1)}</div>
+        )}
+
+        <div className="absolute bottom-0 left-0 right-0 p-2 translate-y-full group-hover:translate-y-0 transition-transform duration-300">
+          <p className="text-white text-[11px] font-semibold line-clamp-2 mb-1">{title}</p>
+          {yr && <p className="text-slate-500 text-[10px]">{yr}</p>}
+        </div>
       </div>
     </button>
   )
 }
 
 export default function SimilarRow({ tmdbId, type }: Props) {
-  const [similar,  setSimilar]  = useState<Movie[]>([])
-  const [loading,  setLoading]  = useState(true)
+  const [similar, setSimilar] = useState<Movie[]>([])
+  const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     setLoading(true)
@@ -58,10 +67,10 @@ export default function SimilarRow({ tmdbId, type }: Props) {
   if (loading) {
     return (
       <div>
-        <div className="h-5 w-36 bg-dark-card animate-pulse rounded mb-3" />
+        <div className="h-5 w-36 skeleton rounded mb-4" />
         <div className="flex gap-2 sm:gap-3 overflow-x-auto scrollbar-hide pb-2">
-          {Array(6).fill(0).map((_, i) => (
-            <div key={i} className="flex-shrink-0 w-28 sm:w-36 aspect-[2/3] rounded-xl bg-dark-card animate-pulse" />
+          {Array(7).fill(0).map((_, i) => (
+            <div key={i} className="flex-shrink-0 w-28 sm:w-36 skeleton rounded-xl" style={{ aspectRatio:'2/3' }} />
           ))}
         </div>
       </div>
@@ -72,9 +81,9 @@ export default function SimilarRow({ tmdbId, type }: Props) {
 
   return (
     <div>
-      <h3 className="text-base font-black mb-3">More Like This</h3>
-      <div className="flex gap-2 sm:gap-3 overflow-x-auto scrollbar-hide pb-2 -mx-3 px-3 sm:mx-0 sm:px-0">
-        {similar.map(m => <Card key={m.id} movie={m} type={type} />)}
+      <h3 className="section-title mb-4">More Like This</h3>
+      <div className="flex gap-2 sm:gap-3 overflow-x-auto scrollbar-hide pb-2 -mx-3 px-3 sm:-mx-6 sm:px-6">
+        {similar.map(m => <SimilarCard key={m.id} movie={m} type={type} />)}
       </div>
     </div>
   )

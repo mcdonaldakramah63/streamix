@@ -3,7 +3,6 @@ import { useEffect, useState, useCallback, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Movie } from '../types'
 import api from '../services/api'
-import { backdrop, rating, year } from '../services/tmdb'
 import Carousel  from '../components/Carousel'
 import MovieCard from '../components/MovieCard'
 import { useInfiniteScroll } from '../hooks/useInfiniteScroll'
@@ -15,7 +14,6 @@ const GENRES = [
   { id: 16,    label: 'Animation',    icon: '🎨' },
   { id: 35,    label: 'Comedy',       icon: '😂' },
   { id: 80,    label: 'Crime',        icon: '🔫' },
-  { id: 99,    label: 'Documentary',  icon: '🎥' },
   { id: 18,    label: 'Drama',        icon: '🎭' },
   { id: 10751, label: 'Family',       icon: '👨‍👩‍👧' },
   { id: 14,    label: 'Fantasy',      icon: '🧙' },
@@ -30,51 +28,43 @@ const GENRES = [
   { id: 37,    label: 'Western',      icon: '🤠' },
 ]
 
-const SORT_OPTIONS = [
-  { value: 'popularity.desc',   label: '🔥 Most Popular'    },
-  { value: 'vote_average.desc', label: '⭐ Top Rated'        },
-  { value: 'release_date.desc', label: '🆕 Newest First'    },
-  { value: 'release_date.asc',  label: '📅 Oldest First'    },
-  { value: 'revenue.desc',      label: '💰 Highest Grossing' },
-  { value: 'vote_count.desc',   label: '🗳️ Most Voted'       },
+const SORT = [
+  { value: 'popularity.desc',   label: 'Most Popular'    },
+  { value: 'vote_average.desc', label: 'Top Rated'       },
+  { value: 'release_date.desc', label: 'Newest First'    },
+  { value: 'release_date.asc',  label: 'Oldest First'    },
+  { value: 'revenue.desc',      label: 'Highest Grossing' },
+  { value: 'vote_count.desc',   label: 'Most Voted'      },
 ]
-
-function SkeletonCard() {
-  return <div className="aspect-[2/3] rounded-xl bg-dark-card animate-pulse" />
-}
-
-function SkeletonGrid({ n = 18 }: { n?: number }) {
-  return (
-    <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-7 gap-2 sm:gap-3">
-      {Array(n).fill(0).map((_, i) => <SkeletonCard key={i} />)}
-    </div>
-  )
-}
 
 export default function Movies() {
   const navigate = useNavigate()
 
-  const [trending,  setTrending]  = useState<Movie[]>([])
-  const [topRated,  setTopRated]  = useState<Movie[]>([])
-  const [upcoming,  setUpcoming]  = useState<Movie[]>([])
-  const [nowPlaying,setNowPlaying]= useState<Movie[]>([])
-  const [heroLoad,  setHeroLoad]  = useState(true)
+  // Carousels
+  const [trending,   setTrending]   = useState<Movie[]>([])
+  const [topRated,   setTopRated]   = useState<Movie[]>([])
+  const [upcoming,   setUpcoming]   = useState<Movie[]>([])
+  const [nowPlaying, setNowPlaying] = useState<Movie[]>([])
+  const [heroLoad,   setHeroLoad]   = useState(true)
 
-  const [movies,    setMovies]    = useState<Movie[]>([])
-  const [page,      setPage]      = useState(1)
-  const [hasMore,   setHasMore]   = useState(true)
-  const [busy,      setBusy]      = useState(false)
-  const [gridLoad,  setGridLoad]  = useState(true)
+  // Browse
+  const [movies,   setMovies]   = useState<Movie[]>([])
+  const [page,     setPage]     = useState(1)
+  const [hasMore,  setHasMore]  = useState(true)
+  const [busy,     setBusy]     = useState(false)
+  const [gridLoad, setGridLoad] = useState(true)
 
-  const [genre,     setGenre]     = useState(0)
-  const [sort,      setSort]      = useState('popularity.desc')
-  const [search,    setSearch]    = useState('')
-  const [searchQ,   setSearchQ]   = useState('')
-  const [tab,       setTab]       = useState<'discover'|'search'>('discover')
+  // Filters
+  const [genre,   setGenre]   = useState(0)
+  const [sort,    setSort]    = useState('popularity.desc')
+  const [search,  setSearch]  = useState('')
+  const [searchQ, setSearchQ] = useState('')
+  const [heroIdx, setHeroIdx] = useState(0)
 
-  const debRef = useRef<ReturnType<typeof setTimeout>>()
+  const debRef    = useRef<ReturnType<typeof setTimeout>>()
+  const heroTimer = useRef<ReturnType<typeof setInterval>>()
 
-  // Hero + carousels
+  // Load carousels
   useEffect(() => {
     setHeroLoad(true)
     Promise.all([
@@ -87,8 +77,15 @@ export default function Movies() {
       setTopRated(  r.data.results || [])
       setUpcoming(  u.data.results || [])
       setNowPlaying(n.data.results || [])
-    }).catch(console.error).finally(() => setHeroLoad(false))
+    }).finally(() => setHeroLoad(false))
   }, [])
+
+  // Auto-rotate hero
+  useEffect(() => {
+    if (!trending.length) return
+    heroTimer.current = setInterval(() => setHeroIdx(i => (i + 1) % Math.min(trending.length, 5)), 5000)
+    return () => clearInterval(heroTimer.current)
+  }, [trending.length])
 
   // Fetch grid
   const fetchMovies = useCallback(async (pg: number, reset: boolean) => {
@@ -104,7 +101,7 @@ export default function Movies() {
         const res = await api.get('/movies/discover', { params })
         data = res.data
       }
-      const results: Movie[] = (data.results || [])
+      const results: Movie[] = data.results || []
       reset ? setMovies(results) : setMovies(p => [...p, ...results])
       setPage(pg)
       setHasMore(pg < Math.min(data.total_pages || 1, 50))
@@ -117,132 +114,146 @@ export default function Movies() {
   // Debounce search
   useEffect(() => {
     clearTimeout(debRef.current)
-    debRef.current = setTimeout(() => { setSearchQ(search); setTab(search ? 'search' : 'discover') }, 500)
+    debRef.current = setTimeout(() => setSearchQ(search), 450)
     return () => clearTimeout(debRef.current)
   }, [search])
 
   const loadMore = useCallback(() => { if (!busy && hasMore) fetchMovies(page + 1, false) }, [busy, hasMore, page, fetchMovies])
   const sentinel = useInfiniteScroll(loadMore, hasMore && !busy && !gridLoad)
 
-  const hero = trending[0]
+  const hero = trending[heroIdx]
 
   return (
-    <div className="pt-14 min-h-screen">
+    <div className="min-h-screen">
 
-      {/* ── Hero Banner ── */}
+      {/* ── Hero ── */}
       {heroLoad ? (
-        <div className="h-[300px] sm:h-[460px] bg-dark-surface animate-pulse" />
+        <div className="skeleton" style={{ height: 'clamp(240px,45vw,460px)' }} />
       ) : hero ? (
-        <div className="relative h-[300px] sm:h-[460px] overflow-hidden">
-          <img src={backdrop(hero.backdrop_path, 'w1280')} alt={hero.title} className="w-full h-full object-cover object-center" />
-          <div className="absolute inset-0" style={{ background: 'linear-gradient(to right, rgba(6,9,15,0.95) 0%, rgba(6,9,15,0.6) 50%, rgba(6,9,15,0.2) 100%)' }} />
-          <div className="absolute inset-0" style={{ background: 'linear-gradient(to top, rgba(6,9,15,1) 0%, transparent 60%)' }} />
-          <div className="absolute bottom-6 sm:bottom-12 left-4 sm:left-8 right-4 max-w-xl">
-            <span className="inline-flex items-center gap-1.5 bg-brand/20 border border-brand/40 text-brand text-xs font-bold px-3 py-1 rounded-full mb-3">
-              🔥 Trending Now
-            </span>
-            <h1 className="text-2xl sm:text-5xl font-black leading-tight mb-2 drop-shadow-lg">{hero.title}</h1>
-            <div className="flex gap-2 items-center mb-3 flex-wrap">
-              <span className="text-yellow-400 font-bold text-sm">★ {rating(hero.vote_average)}</span>
-              <span className="text-slate-400 text-sm">{year(hero.release_date)}</span>
+        <div className="relative overflow-hidden" style={{ height: 'clamp(240px,45vw,460px)' }}>
+          <img src={`https://image.tmdb.org/t/p/w1280${hero.backdrop_path}`} alt=""
+            className="absolute inset-0 w-full h-full object-cover object-top" />
+          <div className="absolute inset-0 bg-hero-gradient" />
+          <div className="absolute inset-0" style={{ background: 'linear-gradient(to top, #07080c 0%, transparent 45%)' }} />
+
+          <div className="absolute bottom-8 sm:bottom-14 left-4 sm:left-8 right-4 max-w-xl">
+            <span className="badge-brand text-[11px] mb-3 inline-flex">🎬 Featured Movie</span>
+            <h1 className="font-bold text-shadow mb-2 leading-tight"
+              style={{ fontFamily:'Syne, sans-serif', fontSize:'clamp(1.5rem, 4vw, 3rem)' }}>
+              {hero.title}
+            </h1>
+            <div className="flex items-center gap-3 mb-4 text-sm text-slate-400">
+              {hero.vote_average >= 7 && <span className="badge-gold">★ {hero.vote_average.toFixed(1)}</span>}
+              <span>{hero.release_date?.slice(0,4)}</span>
             </div>
             <p className="text-slate-300 text-sm leading-relaxed line-clamp-2 mb-5 hidden sm:block max-w-md">{hero.overview}</p>
-            <div className="flex gap-2">
-              <button onClick={() => navigate(`/player/movie/${hero.id}`)} className="btn-primary px-5 py-2.5 text-sm gap-2 flex items-center">
-                ▶ Play Now
-              </button>
-              <button onClick={() => navigate(`/movie/${hero.id}`)} className="btn-secondary px-5 py-2.5 text-sm">
-                More Info
-              </button>
+            <div className="flex gap-2.5">
+              <button onClick={() => navigate(`/player/movie/${hero.id}`)} className="btn-primary px-5 py-2.5 text-sm">▶ Play Now</button>
+              <button onClick={() => navigate(`/movie/${hero.id}`)}        className="btn-secondary px-5 py-2.5 text-sm">Info</button>
             </div>
+          </div>
+
+          {/* Dots */}
+          <div className="absolute bottom-4 right-4 flex gap-1.5">
+            {trending.slice(0,5).map((_, i) => (
+              <button key={i} onClick={() => { setHeroIdx(i); clearInterval(heroTimer.current!) }}
+                className={`rounded-full transition-all ${i === heroIdx ? 'w-5 h-1.5 bg-brand' : 'w-1.5 h-1.5 bg-white/30'}`} />
+            ))}
           </div>
         </div>
       ) : null}
 
       {/* ── Carousels ── */}
-      <Carousel title="🔥 Trending This Week" movies={trending}   loading={heroLoad} />
-      <Carousel title="🎬 Now Playing"        movies={nowPlaying} loading={heroLoad} />
-      <Carousel title="⭐ Top Rated All Time" movies={topRated}   loading={heroLoad} />
-      <Carousel title="🗓 Coming Soon"        movies={upcoming}   loading={heroLoad} />
+      <Carousel title="🔥 Trending"    movies={trending}   loading={heroLoad} />
+      <Carousel title="🎬 Now Playing" movies={nowPlaying} loading={heroLoad} />
+      <Carousel title="⭐ Top Rated"   movies={topRated}   loading={heroLoad} />
+      <Carousel title="🗓 Coming Soon" movies={upcoming}   loading={heroLoad} />
 
       {/* ── Browse ── */}
-      <section className="px-3 sm:px-6 py-6">
+      <section className="px-3 sm:px-6 pb-12 mt-2">
 
-        {/* Header */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-5">
+        {/* Header + search */}
+        <div className="flex flex-col sm:flex-row sm:items-center gap-3 mb-5">
           <div>
-            <h2 className="text-xl sm:text-2xl font-black text-white">🎬 Browse Movies</h2>
-            {!gridLoad && <p className="text-xs text-slate-500 mt-0.5">{movies.length.toLocaleString()} movies</p>}
+            <h2 className="section-title">Browse Movies</h2>
+            {!gridLoad && !searchQ && (
+              <p className="text-xs text-slate-600 mt-0.5">{movies.length}+ movies</p>
+            )}
           </div>
-
-          {/* Search bar */}
-          <div className="flex items-center gap-2 bg-dark-surface border border-dark-border rounded-xl px-4 py-2.5 flex-1 sm:max-w-sm focus-within:border-brand/50 transition-colors">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-slate-500 flex-shrink-0">
+          {/* Search */}
+          <div className="sm:ml-auto flex items-center gap-2.5 bg-dark-surface border border-dark-border rounded-xl px-4 py-2.5 w-full sm:max-w-xs focus-within:border-brand/40 transition-colors">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-slate-500 flex-shrink-0">
               <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
             </svg>
             <input value={search} onChange={e => setSearch(e.target.value)}
-              placeholder="Search movies..."
+              placeholder="Search movies…"
               className="bg-transparent outline-none text-sm text-white placeholder-slate-500 flex-1" />
-            {search && <button onClick={() => setSearch('')} className="text-slate-500 hover:text-white">✕</button>}
+            {search && <button onClick={() => setSearch('')} className="text-slate-500 hover:text-white text-xs">✕</button>}
           </div>
         </div>
 
-        {/* Genre pills + sort — hidden during search */}
-        {tab === 'discover' && (
-          <>
-            <div className="flex gap-2 overflow-x-auto scrollbar-hide pb-3 mb-3 -mx-3 px-3 sm:-mx-6 sm:px-6">
-              {GENRES.map(g => (
-                <button key={g.id} onClick={() => setGenre(g.id)}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold flex-shrink-0 transition-all whitespace-nowrap border ${
-                    genre === g.id
-                      ? 'bg-brand text-dark border-brand shadow-lg shadow-brand/20 scale-105'
-                      : 'bg-dark-card border-dark-border text-slate-400 hover:border-brand/50 hover:text-white'
-                  }`}>
-                  <span>{g.icon}</span> {g.label}
-                </button>
-              ))}
-            </div>
-
-            <div className="flex items-center gap-3 mb-5">
-              <span className="text-xs text-slate-500 flex-shrink-0">Sort:</span>
-              <select value={sort} onChange={e => setSort(e.target.value)}
-                className="bg-dark-card border border-dark-border rounded-lg px-3 py-1.5 text-xs text-slate-300 outline-none cursor-pointer hover:border-brand transition-colors flex-shrink-0">
-                {SORT_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-              </select>
-            </div>
-          </>
-        )}
-
-        {/* Search label */}
-        {tab === 'search' && searchQ && (
-          <div className="flex items-center gap-3 mb-5">
-            <p className="text-sm text-slate-400">Results for <span className="text-white font-semibold">"{searchQ}"</span></p>
-            <button onClick={() => { setSearch(''); setSearchQ(''); setTab('discover') }}
-              className="text-xs text-brand hover:underline">Clear</button>
+        {/* Genre pills */}
+        {!searchQ && (
+          <div className="flex gap-2 overflow-x-auto scrollbar-hide pb-3 mb-3 -mx-3 px-3 sm:-mx-6 sm:px-6">
+            {GENRES.map(g => (
+              <button key={g.id} onClick={() => setGenre(g.id)}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold flex-shrink-0 border transition-all whitespace-nowrap ${
+                  genre === g.id
+                    ? 'bg-brand text-dark border-brand shadow-brand-sm scale-105'
+                    : 'bg-dark-card border-dark-border text-slate-400 hover:border-brand/40 hover:text-white'
+                }`}>
+                <span>{g.icon}</span>{g.label}
+              </button>
+            ))}
           </div>
         )}
 
-        {/* Movie grid */}
-        {gridLoad ? <SkeletonGrid /> : movies.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-20 text-slate-500 gap-3">
+        {/* Sort */}
+        {!searchQ && (
+          <div className="flex items-center gap-3 mb-5">
+            <span className="text-xs text-slate-600 flex-shrink-0">Sort:</span>
+            <select value={sort} onChange={e => setSort(e.target.value)}
+              className="bg-dark-card border border-dark-border rounded-xl px-3 py-1.5 text-xs text-slate-300 outline-none cursor-pointer hover:border-brand/40 transition-colors">
+              {SORT.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+            </select>
+          </div>
+        )}
+
+        {/* Search label */}
+        {searchQ && (
+          <div className="flex items-center gap-3 mb-5">
+            <p className="text-sm text-slate-400">Results for <span className="text-white font-semibold">"{searchQ}"</span></p>
+            <button onClick={() => { setSearch(''); setSearchQ('') }} className="text-xs text-brand hover:underline">Clear</button>
+          </div>
+        )}
+
+        {/* Grid */}
+        {gridLoad ? (
+          <div className="movie-card-grid">
+            {Array(18).fill(0).map((_, i) => (
+              <div key={i} className="skeleton rounded-xl" style={{ aspectRatio:'2/3' }} />
+            ))}
+          </div>
+        ) : movies.length === 0 ? (
+          <div className="flex flex-col items-center py-20 text-slate-500 gap-3">
             <span className="text-5xl">🎬</span>
-            <p className="text-base">No movies found{searchQ ? ` for "${searchQ}"` : ''}</p>
+            <p>No movies found{searchQ ? ` for "${searchQ}"` : ''}</p>
             <button onClick={() => { setGenre(0); setSort('popularity.desc'); setSearch('') }}
               className="text-brand text-sm hover:underline">Reset filters</button>
           </div>
         ) : (
           <>
-            <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-7 gap-2 sm:gap-3">
+            <div className="movie-card-grid">
               {movies.map(m => <MovieCard key={m.id} movie={m} />)}
             </div>
             <div ref={sentinel} className="h-4 mt-4" />
             {busy && (
-              <div className="flex justify-center py-6">
+              <div className="flex justify-center py-8">
                 <div className="w-7 h-7 border-2 border-dark-border border-t-brand rounded-full animate-spin" />
               </div>
             )}
             {!hasMore && movies.length > 0 && (
-              <p className="text-center text-xs text-slate-600 py-8">✓ You've seen everything</p>
+              <p className="text-center text-xs text-slate-700 py-8">— End of list —</p>
             )}
           </>
         )}

@@ -2,41 +2,212 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ── Google Fonts already loaded in index.html ── */
+
 @layer base {
-  * { box-sizing: border-box; }
-  html { -webkit-tap-highlight-color: transparent; }
-  body {
-    background: #06090f;
-    color: #f1f5f9;
-    font-family: 'DM Sans', system-ui, sans-serif;
-    overflow-x: hidden;
+  :root {
+    --color-dark:         #07080c;
+    --color-surface:      #0e1018;
+    --color-card:         #13161f;
+    --color-border:       #1e2235;
+    --color-brand:        #14b8a6;
+    --color-brand-dark:   #0d9488;
+    --color-brand-glow:   rgba(20, 184, 166, 0.15);
+    --color-text:         #f1f5f9;
+    --color-muted:        #64748b;
+    --color-subtle:       #334155;
   }
-  ::-webkit-scrollbar { width: 4px; height: 4px; }
-  ::-webkit-scrollbar-track { background: #0d1117; }
-  ::-webkit-scrollbar-thumb { background: #1e2530; border-radius: 3px; }
-  ::-webkit-scrollbar-thumb:hover { background: #14b8a6; }
+
+  html { scroll-behavior: smooth; }
+
+  body {
+    @apply bg-dark text-slate-100 antialiased;
+    font-family: 'DM Sans', sans-serif;
+    background-color: #07080c;
+  }
+
+  /* Headings use display font */
+  h1, h2, h3, h4 {
+    font-family: 'Syne', sans-serif;
+  }
+
+  * { -webkit-tap-highlight-color: transparent; }
+
+  img { @apply select-none; }
 }
 
 @layer components {
+
+  /* ── Buttons ─────────────────────────────────────────── */
   .btn-primary {
-    @apply bg-brand text-dark font-bold px-5 py-2.5 rounded-lg text-sm hover:bg-brand-dark transition-colors active:scale-95;
+    @apply inline-flex items-center justify-center gap-2
+           bg-brand text-dark font-semibold rounded-xl
+           px-5 py-2.5 text-sm
+           transition-all duration-200
+           hover:bg-brand-light hover:shadow-brand-sm
+           active:scale-95;
+    font-family: 'DM Sans', sans-serif;
   }
+
   .btn-secondary {
-    @apply bg-white/10 text-white border border-white/15 px-5 py-2.5 rounded-lg text-sm hover:bg-white/20 transition-colors active:scale-95;
+    @apply inline-flex items-center justify-center gap-2
+           bg-dark-card border border-dark-border text-slate-300 font-medium rounded-xl
+           px-5 py-2.5 text-sm
+           transition-all duration-200
+           hover:border-brand/60 hover:text-white hover:bg-dark-hover
+           active:scale-95;
+    font-family: 'DM Sans', sans-serif;
   }
+
   .btn-ghost {
-    @apply bg-dark-card text-white border border-dark-border px-4 py-2 rounded-lg text-sm hover:bg-dark-border transition-colors active:scale-95;
+    @apply inline-flex items-center justify-center gap-2
+           text-slate-400 font-medium rounded-xl
+           px-4 py-2 text-sm
+           transition-all duration-200
+           hover:text-white hover:bg-dark-hover
+           active:scale-95;
   }
+
+  .btn-icon {
+    @apply w-10 h-10 rounded-xl flex items-center justify-center
+           text-slate-400 border border-dark-border bg-dark-card
+           transition-all duration-200
+           hover:text-white hover:border-brand/50
+           active:scale-95;
+  }
+
+  /* ── Cards ───────────────────────────────────────────── */
+  .card {
+    @apply bg-dark-card border border-dark-border rounded-2xl
+           shadow-card transition-all duration-300;
+  }
+
   .card-hover {
-    @apply transition-transform duration-200 active:scale-95 sm:hover:scale-105 cursor-pointer;
+    @apply card hover:border-brand/30 hover:shadow-brand-sm hover:-translate-y-0.5;
   }
-  .line-clamp-2 { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-  .line-clamp-3 { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
-  .scrollbar-hide { scrollbar-width: none; }
+
+  /* ── Input ───────────────────────────────────────────── */
+  .input {
+    @apply w-full bg-dark-surface border border-dark-border rounded-xl
+           px-4 py-3 text-white text-sm placeholder-slate-500
+           outline-none transition-all duration-200
+           focus:border-brand/50 focus:ring-1 focus:ring-brand/20;
+    font-family: 'DM Sans', sans-serif;
+    font-size: 16px; /* Prevents iOS zoom */
+  }
+
+  /* ── Section title ───────────────────────────────────── */
+  .section-title {
+    @apply text-lg sm:text-xl font-bold text-white;
+    font-family: 'Syne', sans-serif;
+  }
+
+  /* ── Badge ───────────────────────────────────────────── */
+  .badge {
+    @apply inline-flex items-center gap-1 px-2.5 py-0.5
+           rounded-full text-xs font-semibold;
+  }
+
+  .badge-brand {
+    @apply badge bg-brand/15 border border-brand/30 text-brand;
+  }
+
+  .badge-gold {
+    @apply badge bg-gold/15 border border-gold/30 text-gold;
+  }
+
+  /* ── Skeleton loader ──────────────────────────────────── */
+  .skeleton {
+    @apply rounded-xl bg-dark-card relative overflow-hidden;
+    background: linear-gradient(
+      90deg,
+      #13161f 0%,
+      #1a1e2e 40%,
+      #13161f 80%
+    );
+    background-size: 1000px 100%;
+    animation: shimmer 1.8s infinite;
+  }
+
+  /* ── Scrollbar hide ───────────────────────────────────── */
+  .scrollbar-hide {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
   .scrollbar-hide::-webkit-scrollbar { display: none; }
 
-  /* Mobile-friendly grid for movie pages */
-  .movie-grid {
-    @apply grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-7 gap-2 sm:gap-3 md:gap-4;
+  /* ── Glass effect ─────────────────────────────────────── */
+  .glass {
+    background: rgba(14, 16, 24, 0.85);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: 1px solid rgba(30, 34, 53, 0.8);
   }
+
+  /* ── Gradient text ────────────────────────────────────── */
+  .text-gradient {
+    background: linear-gradient(135deg, #14b8a6, #2dd4bf);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  /* ── Carousel arrow button ────────────────────────────── */
+  .carousel-btn {
+    @apply absolute top-1/2 -translate-y-1/2 z-10
+           w-9 h-9 rounded-full glass
+           flex items-center justify-center
+           text-white/70 hover:text-white
+           transition-all duration-200
+           opacity-0 group-hover:opacity-100;
+  }
+
+  /* ── Movie card consistent sizing ────────────────────────── */
+  .movie-card-grid {
+    @apply grid gap-2 sm:gap-3;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  @media (min-width: 480px) {
+    .movie-card-grid {
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+    }
+  }
+
+  @media (min-width: 640px) {
+    .movie-card-grid {
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+    }
+  }
+
+  @media (min-width: 768px) {
+    .movie-card-grid {
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+    }
+  }
+
+  @media (min-width: 1024px) {
+    .movie-card-grid {
+      grid-template-columns: repeat(6, minmax(0, 1fr));
+    }
+  }
+
+  @media (min-width: 1280px) {
+    .movie-card-grid {
+      grid-template-columns: repeat(7, minmax(0, 1fr));
+    }
+  }
+
+  @media (min-width: 1536px) {
+    .movie-card-grid {
+      grid-template-columns: repeat(8, minmax(0, 1fr));
+    }
+  }
+}
+
+@layer utilities {
+  .text-shadow { text-shadow: 0 2px 12px rgba(0,0,0,0.8); }
+  .text-shadow-sm { text-shadow: 0 1px 6px rgba(0,0,0,0.6); }
+  .no-scrollbar { scrollbar-width: none; }
+  .no-scrollbar::-webkit-scrollbar { display: none; }
 }

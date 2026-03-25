@@ -1,4 +1,4 @@
-// frontend/src/components/ShareButton.tsx — NEW FILE
+// frontend/src/components/ShareButton.tsx — FULL REPLACEMENT
 import { useState } from 'react'
 
 interface Props {
@@ -7,24 +7,23 @@ interface Props {
 }
 
 export default function ShareButton({ title, url }: Props) {
-  const [copied, setCopied] = useState(false)
+  const [state, setState] = useState<'idle'|'copied'|'shared'>('idle')
   const shareUrl = url || window.location.href
 
   const handleShare = async () => {
-    // Try native share (mobile)
     if (navigator.share) {
       try {
         await navigator.share({ title, url: shareUrl })
+        setState('shared')
+        setTimeout(() => setState('idle'), 2000)
         return
-      } catch { /* cancelled */ }
+      } catch { /* cancelled or unsupported */ }
     }
-    // Fallback: copy to clipboard
     try {
       await navigator.clipboard.writeText(shareUrl)
-      setCopied(true)
-      setTimeout(() => setCopied(false), 2000)
+      setState('copied')
+      setTimeout(() => setState('idle'), 2000)
     } catch {
-      // Last resort: prompt
       prompt('Copy this link:', shareUrl)
     }
   }
@@ -32,22 +31,33 @@ export default function ShareButton({ title, url }: Props) {
   return (
     <button
       onClick={handleShare}
-      className="flex items-center gap-2 px-3 py-2 rounded-xl bg-dark-card border border-dark-border text-slate-400 hover:text-white hover:border-brand transition-all text-sm active:scale-95">
-      {copied ? (
+      className={`flex items-center gap-2 px-3.5 py-2.5 rounded-xl border text-xs font-medium transition-all duration-200 active:scale-95 ${
+        state !== 'idle'
+          ? 'bg-brand/10 border-brand/40 text-brand'
+          : 'bg-dark-card border-dark-border text-slate-400 hover:border-brand/40 hover:text-white'
+      }`}>
+      {state === 'copied' ? (
         <>
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className="text-brand">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
             <polyline points="20 6 9 17 4 12"/>
           </svg>
-          <span className="text-brand text-xs font-semibold">Copied!</span>
+          Copied!
+        </>
+      ) : state === 'shared' ? (
+        <>
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+            <polyline points="20 6 9 17 4 12"/>
+          </svg>
+          Shared!
         </>
       ) : (
         <>
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
             <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/>
             <polyline points="16 6 12 2 8 6"/>
             <line x1="12" y1="2" x2="12" y2="15"/>
           </svg>
-          <span className="text-xs">Share</span>
+          Share
         </>
       )}
     </button>
