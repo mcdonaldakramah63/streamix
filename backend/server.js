@@ -107,4 +107,8 @@ app.use((err, req, res, next) => {
 })
 
 const PORT = process.env.PORT || 5000
-app.listen(PORT, () => console.log(`[Streamix] Server on port ${PORT} [${process.env.NODE_ENV}]`))
+const http = require('http')
+const { setupWebSocket } = require('./websocket')
+const server = http.createServer(app)
+setupWebSocket(server)
+server.listen(PORT, () => console.log(`[Streamix] Server on port ${PORT}`))
