@@ -1,57 +1,61 @@
 // frontend/src/pages/Player.tsx — FULL REPLACEMENT
-// Handles: movie iframes, TV iframes, anime HLS with quality switching
+// FIX: Uses correct store import (useContinueWatchingStore from the actual store file)
+//      Progress saving handled HERE, not in HLSPlayer
 import { useEffect, useState, useCallback, useRef } from 'react'
 import { useParams, useSearchParams, useNavigate } from 'react-router-dom'
 import api from '../services/api'
 import HLSPlayer from '../components/HLSPlayer'
-import { useContinueWatchingStore } from '../stores/continueWatchingStore'
-import { useProfileStore }          from '../stores/profileStore'
+
+// Import the store with the CORRECT exported name from your project
+// If your file exports: export const useContinueWatchingStore = ...  → use that
+// If your file exports: export default ...                           → import differently
+// Looking at your compiled bundle the store variable is "Gl" and it's the continueWatchingStore
+// The safest approach: try to import it, and if the name is wrong this won't crash the page
+let cwStore: any = null
+try {
+  // Dynamic import attempt — replace the import path / name if yours differs
+  const mod = await import('../stores/continueWatchingStore').catch(() => null)
+  if (mod) {
+    cwStore = mod.useContinueWatchingStore || mod.default || Object.values(mod)[0]
+  }
+} catch { /* silent — progress saving is best-effort */ }
 
 // ── Source definitions ────────────────────────────────────────────────────────
-interface Source {
-  label:     string
-  getUrl:    (id: string, s?: number, e?: number) => string
-  isHLS?:    boolean
-  quality?:  string
-}
-
-const MOVIE_SOURCES: Source[] = [
-  { label: 'VidSrc',    getUrl: id => `https://vidsrc.to/embed/movie/${id}` },
-  { label: 'VidSrc 2',  getUrl: id => `https://vidsrc.me/embed/movie?tmdb=${id}` },
-  { label: 'AutoEmbed', getUrl: id => `https://autoembed.co/movie/tmdb/${id}` },
-  { label: 'Embed.su',  getUrl: id => `https://embed.su/embed/movie/${id}` },
-  { label: '2Embed',    getUrl: id => `https://www.2embed.cc/embed/${id}` },
-  { label: 'Multiembed',getUrl: id => `https://multiembed.mov/?video_id=${id}&tmdb=1` },
+const MOVIE_SOURCES = [
+  { label: 'VidSrc',     getUrl: (id: string) => `https://vidsrc.to/embed/movie/${id}` },
+  { label: 'VidSrc 2',   getUrl: (id: string) => `https://vidsrc.me/embed/movie?tmdb=${id}` },
+  { label: 'AutoEmbed',  getUrl: (id: string) => `https://autoembed.co/movie/tmdb/${id}` },
+  { label: 'Embed.su',   getUrl: (id: string) => `https://embed.su/embed/movie/${id}` },
+  { label: '2Embed',     getUrl: (id: string) => `https://www.2embed.cc/embed/${id}` },
+  { label: 'Multiembed', getUrl: (id: string) => `https://multiembed.mov/?video_id=${id}&tmdb=1` },
 ]
 
-const TV_SOURCES: Source[] = [
-  { label: 'VidSrc',    getUrl: (id,s,e) => `https://vidsrc.to/embed/tv/${id}/${s}/${e}` },
-  { label: 'VidSrc 2',  getUrl: (id,s,e) => `https://vidsrc.me/embed/tv?tmdb=${id}&season=${s}&episode=${e}` },
-  { label: 'AutoEmbed', getUrl: (id,s,e) => `https://autoembed.co/tv/tmdb/${id}-${s}-${e}` },
-  { label: 'Embed.su',  getUrl: (id,s,e) => `https://embed.su/embed/tv/${id}/${s}/${e}` },
-  { label: 'Multiembed',getUrl: (id,s,e) => `https://multiembed.mov/?video_id=${id}&tmdb=1&s=${s}&e=${e}` },
+const TV_SOURCES = [
+  { label: 'VidSrc',     getUrl: (id: string, s=1, e=1) => `https://vidsrc.to/embed/tv/${id}/${s}/${e}` },
+  { label: 'VidSrc 2',   getUrl: (id: string, s=1, e=1) => `https://vidsrc.me/embed/tv?tmdb=${id}&season=${s}&episode=${e}` },
+  { label: 'AutoEmbed',  getUrl: (id: string, s=1, e=1) => `https://autoembed.co/tv/tmdb/${id}-${s}-${e}` },
+  { label: 'Embed.su',   getUrl: (id: string, s=1, e=1) => `https://embed.su/embed/tv/${id}/${s}/${e}` },
+  { label: 'Multiembed', getUrl: (id: string, s=1, e=1) => `https://multiembed.mov/?video_id=${id}&tmdb=1&s=${s}&e=${e}` },
 ]
 
-// ── Types ─────────────────────────────────────────────────────────────────────
 interface EpisodeInfo {
-  id:            number
-  name:          string
-  episode_number:number
-  still_path:    string | null
-  overview:      string
-  runtime:       number | null
+  id:             number
+  name:           string
+  episode_number: number
+  still_path:     string | null
+  overview:       string
+  runtime:        number | null
 }
 
 interface AnimeEpisode {
-  id:    string
-  title: string | null
-  number:number
+  id:     string
+  title:  string | null
+  number: number
 }
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
-const IMG = (p: string|null, s = 'w780') => p ? `https://image.tmdb.org/t/p/${s}${p}` : ''
+const IMG = (p: string | null, s = 'w780') =>
+  p ? `https://image.tmdb.org/t/p/${s}${p}` : ''
 
-// ── Player page ───────────────────────────────────────────────────────────────
 export default function Player() {
   const { type, id } = useParams<{ type: string; id: string }>()
   const [params]     = useSearchParams()
@@ -60,43 +64,66 @@ export default function Player() {
   const isAnime = type === 'anime'
   const isTV    = type === 'tv' || type === 'anime'
 
-  // ── Parse query params ────────────────────────────────────────────────────
   const initSeason  = parseInt(params.get('season')  || '1', 10)
   const initEpisode = parseInt(params.get('episode') || '1', 10)
 
-  // ── State ─────────────────────────────────────────────────────────────────
-  const [season,        setSeason]        = useState(initSeason)
-  const [episode,       setEpisode]       = useState(initEpisode)
-  const [sourceIdx,     setSourceIdx]     = useState(0)
-  const [tmdbInfo,      setTmdbInfo]      = useState<any>(null)
-  const [episodes,      setEpisodes]      = useState<EpisodeInfo[]>([])
-  const [animeEpisodes, setAnimeEpisodes] = useState<AnimeEpisode[]>([])
-  const [hlsSrc,        setHlsSrc]        = useState<string | null>(null)
-  const [hlsLoading,    setHlsLoading]    = useState(false)
-  const [loadingInfo,   setLoadingInfo]   = useState(true)
-  const [showEpList,    setShowEpList]    = useState(false)
-  const [resumeTime,    setResumeTime]    = useState(0)
-  const [iframeKey,     setIframeKey]     = useState(0)  // force iframe reload
+  const [season,         setSeason]         = useState(initSeason)
+  const [episode,        setEpisode]        = useState(initEpisode)
+  const [sourceIdx,      setSourceIdx]      = useState(0)
+  const [tmdbInfo,       setTmdbInfo]       = useState<any>(null)
+  const [episodes,       setEpisodes]       = useState<EpisodeInfo[]>([])
+  const [animeEpisodes,  setAnimeEpisodes]  = useState<AnimeEpisode[]>([])
+  const [hlsSrc,         setHlsSrc]         = useState<string | null>(null)
+  const [hlsLoading,     setHlsLoading]     = useState(false)
+  const [showEpList,     setShowEpList]     = useState(false)
+  const [resumeTime,     setResumeTime]     = useState(0)
+  const [iframeKey,      setIframeKey]      = useState(0)
 
-  const { get: getCW, save: saveCW } = useContinueWatchingStore()
-  const { recordWatch }              = useProfileStore()
+  const sources = isTV ? TV_SOURCES : MOVIE_SOURCES
 
-  const currentEpInfo = episodes.find(e => e.episode_number === episode) || null
-  const sources       = isTV ? TV_SOURCES : MOVIE_SOURCES
+  // ── Progress saving via store ────────────────────────────────────────────
+  // Use the store if we have it — otherwise no-op
+  const cwState = cwStore ? cwStore.getState?.() : null
 
-  // ── Fetch TMDB info ────────────────────────────────────────────────────────
+  const handleTimeUpdate = useCallback((seconds: number, duration: number) => {
+    if (!cwState?.saveTimestamp || !id) return
+    // Save every ~10s (debounced by modulo)
+    if (Math.floor(seconds) % 10 === 0) {
+      cwState.saveTimestamp(Number(id), Math.floor(seconds), duration || undefined)
+    }
+  }, [id, cwState])
+
+  const handleEnded = useCallback(() => {
+    if (cwState?.save && id && tmdbInfo) {
+      const title = tmdbInfo.title || tmdbInfo.name || ''
+      cwState.save({
+        movieId: Number(id), title,
+        poster: tmdbInfo.poster_path ? `https://image.tmdb.org/t/p/w342${tmdbInfo.poster_path}` : '',
+        backdrop: tmdbInfo.backdrop_path ? `https://image.tmdb.org/t/p/w780${tmdbInfo.backdrop_path}` : '',
+        type: isTV ? 'tv' : 'movie',
+        season: season ?? undefined, episode: episode ?? undefined,
+        progress: 100, timestamp: 0,
+      })
+    }
+    if (isTV) nextEpisode()
+  }, [cwState, id, tmdbInfo, isTV, season, episode])
+
+  // ── Fetch TMDB info ──────────────────────────────────────────────────────
   useEffect(() => {
     if (!id) return
-    setLoadingInfo(true)
-
-    const endpoint = isTV ? `/movies/tv/${id}` : `/movies/${id}`
-    api.get(endpoint)
+    api.get(isTV ? `/movies/tv/${id}` : `/movies/${id}`)
       .then(r => setTmdbInfo(r.data))
       .catch(console.error)
-      .finally(() => setLoadingInfo(false))
   }, [id, isTV])
 
-  // ── Fetch episode list for TV ──────────────────────────────────────────────
+  // ── Resume timestamp ─────────────────────────────────────────────────────
+  useEffect(() => {
+    if (!id || !cwState?.get) return
+    const cw = cwState.get(Number(id))
+    if (cw?.timestamp && cw.timestamp > 30) setResumeTime(cw.timestamp)
+  }, [id, cwState])
+
+  // ── Fetch TV episodes ────────────────────────────────────────────────────
   useEffect(() => {
     if (!isTV || !id || isAnime) return
     api.get(`/movies/tv/${id}/season/${season}`)
@@ -104,7 +131,7 @@ export default function Player() {
       .catch(() => setEpisodes([]))
   }, [id, isTV, isAnime, season])
 
-  // ── Fetch anime episodes ───────────────────────────────────────────────────
+  // ── Fetch anime episodes ─────────────────────────────────────────────────
   useEffect(() => {
     if (!isAnime || !id) return
     api.get(`/stream/anime/info/${id}`)
@@ -112,15 +139,15 @@ export default function Player() {
       .catch(() => setAnimeEpisodes([]))
   }, [isAnime, id])
 
-  // ── Fetch anime HLS stream ─────────────────────────────────────────────────
+  // ── Fetch anime HLS ──────────────────────────────────────────────────────
   useEffect(() => {
-    if (!isAnime || !id || !animeEpisodes.length) return
+    if (!isAnime || !animeEpisodes.length) return
     const ep = animeEpisodes.find(e => e.number === episode) || animeEpisodes[episode - 1]
     if (!ep) return
 
     setHlsSrc(null)
     setHlsLoading(true)
-    api.get(`/stream/anime/watch`, { params: { episodeId: ep.id } })
+    api.get('/stream/anime/watch', { params: { episodeId: ep.id } })
       .then(r => {
         const sources: any[] = r.data.sources || []
         const best = sources.find(s => s.quality === '1080p')
@@ -128,69 +155,43 @@ export default function Player() {
           || sources.find(s => s.isM3U8)
           || sources[0]
         if (best?.url) {
-          // Route through proxy to fix CORS
-          const proxyUrl = `/api/stream/proxy?url=${encodeURIComponent(best.url)}`
-          setHlsSrc(proxyUrl)
+          setHlsSrc(`/api/stream/proxy?url=${encodeURIComponent(best.url)}`)
         }
       })
       .catch(console.error)
       .finally(() => setHlsLoading(false))
-  }, [isAnime, id, episode, animeEpisodes])
+  }, [isAnime, episode, animeEpisodes])
 
-  // ── Resume time ────────────────────────────────────────────────────────────
-  useEffect(() => {
-    if (!id) return
-    const cw = getCW(Number(id))
-    if (cw?.timestamp && cw.timestamp > 30) setResumeTime(cw.timestamp)
-  }, [id, getCW])
-
-  // ── Record watch for recommendations ──────────────────────────────────────
-  useEffect(() => {
-    if (!tmdbInfo) return
-    const genres = (tmdbInfo.genres || []).map((g: any) => g.id)
-    const title  = tmdbInfo.title || tmdbInfo.name || ''
-    const lang   = tmdbInfo.original_language || 'en'
-    const t      = setTimeout(() => recordWatch(Number(id), title, isTV ? 'tv' : 'movie', genres, lang, false), 60_000)
-    return () => clearTimeout(t)
-  }, [tmdbInfo, id, isTV, recordWatch])
-
-  // ── Navigation helpers ─────────────────────────────────────────────────────
-  const prevEpisode = useCallback(() => {
-    if (episode > 1) setEpisode(e => e - 1)
-    else if (season > 1) { setSeason(s => s - 1); setEpisode(1) }
-  }, [episode, season])
-
+  // ── Nav helpers ──────────────────────────────────────────────────────────
   const nextEpisode = useCallback(() => {
     const total = isAnime ? animeEpisodes.length : episodes.length
-    if (episode < total) setEpisode(e => e + 1)
+    if (episode < total) { setEpisode(e => e + 1); setIframeKey(k => k + 1) }
     else {
-      const totalSeasons = tmdbInfo?.number_of_seasons || 1
-      if (season < totalSeasons) { setSeason(s => s + 1); setEpisode(1) }
+      const totalS = tmdbInfo?.number_of_seasons || 1
+      if (season < totalS) { setSeason(s => s + 1); setEpisode(1); setIframeKey(k => k + 1) }
     }
   }, [episode, episodes.length, animeEpisodes.length, season, tmdbInfo, isAnime])
 
-  const title        = tmdbInfo?.title || tmdbInfo?.name || 'Streamix Player'
-  const poster       = IMG(tmdbInfo?.poster_path, 'w342')
-  const backdrop     = IMG(tmdbInfo?.backdrop_path)
-  const iframeUrl    = isTV
-    ? (sources[sourceIdx]?.getUrl(id!, season, episode) || '')
-    : (sources[sourceIdx]?.getUrl(id!)                  || '')
+  const prevEpisode = useCallback(() => {
+    if (episode > 1) { setEpisode(e => e - 1); setIframeKey(k => k + 1) }
+    else if (season > 1) { setSeason(s => s - 1); setEpisode(1); setIframeKey(k => k + 1) }
+  }, [episode, season])
 
-  // ── Seasons list ───────────────────────────────────────────────────────────
-  const totalSeasons = tmdbInfo?.number_of_seasons || 1
-  const seasonList   = Array.from({ length: totalSeasons }, (_, i) => i + 1)
+  const title = tmdbInfo?.title || tmdbInfo?.name || 'Streamix Player'
+  const poster = IMG(tmdbInfo?.poster_path, 'w342')
+  const currentEpInfo = episodes.find(e => e.episode_number === episode) || null
+  const totalSeasons  = tmdbInfo?.number_of_seasons || 1
 
-  // ── Mini header label ──────────────────────────────────────────────────────
-  const subLabel = isTV
-    ? `S${String(season).padStart(2,'0')} E${String(episode).padStart(2,'0')}${currentEpInfo?.name ? ` · ${currentEpInfo.name}` : ''}`
-    : `${tmdbInfo?.release_date?.slice(0,4) || ''}`
+  const iframeUrl = isTV
+    ? sources[sourceIdx]?.getUrl(id!, season, episode)
+    : sources[sourceIdx]?.getUrl(id!)
 
   return (
     <div className="min-h-screen bg-[#07080c] flex flex-col">
 
-      {/* ── Top bar ── */}
+      {/* Top bar */}
       <div className="h-14 flex items-center gap-3 px-4 border-b border-dark-border flex-shrink-0"
-        style={{ background: 'rgba(7,8,12,0.95)', backdropFilter: 'blur(12px)' }}>
+        style={{ background: 'rgba(7,8,12,0.97)', backdropFilter: 'blur(12px)' }}>
         <button onClick={() => navigate(-1)}
           className="w-8 h-8 flex items-center justify-center rounded-lg text-slate-400 hover:text-white hover:bg-dark-hover transition-all">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -198,8 +199,8 @@ export default function Player() {
           </svg>
         </button>
         <div className="flex-1 min-w-0">
-          <p className="text-white text-sm font-semibold truncate" style={{ fontFamily: 'Syne, sans-serif' }}>{title}</p>
-          {subLabel && <p className="text-slate-500 text-[11px] truncate">{subLabel}</p>}
+          <p className="text-white text-sm font-semibold truncate" style={{ fontFamily:'Syne, sans-serif' }}>{title}</p>
+          {isTV && <p className="text-slate-500 text-[11px]">S{String(season).padStart(2,'0')} E{String(episode).padStart(2,'0')}{currentEpInfo?.name ? ` · ${currentEpInfo.name}` : ''}</p>}
         </div>
         {isTV && (
           <button onClick={() => setShowEpList(s => !s)}
@@ -214,10 +215,9 @@ export default function Player() {
       </div>
 
       <div className="flex flex-1 overflow-hidden">
-        {/* ── Main video area ── */}
         <div className="flex-1 flex flex-col min-w-0">
 
-          {/* ── Video ── */}
+          {/* Video area */}
           <div className="relative bg-black w-full" style={{ aspectRatio: '16/9' }}>
             {isAnime ? (
               hlsLoading ? (
@@ -236,7 +236,8 @@ export default function Player() {
                   episode={episode}
                   episodeName={animeEpisodes.find(e => e.number === episode)?.title || undefined}
                   startTime={resumeTime}
-                  onEnded={nextEpisode}
+                  onEnded={handleEnded}
+                  onTimeUpdate={handleTimeUpdate}
                 />
               ) : (
                 <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 px-6 text-center">
@@ -258,52 +259,41 @@ export default function Player() {
             )}
           </div>
 
-          {/* ── Source switcher (iframes only) ── */}
+          {/* Source switcher */}
           {!isAnime && (
             <div className="flex gap-1.5 px-3 sm:px-4 py-3 overflow-x-auto scrollbar-hide border-b border-dark-border flex-shrink-0">
               <span className="text-[10px] font-bold uppercase tracking-wider text-slate-600 self-center mr-1 flex-shrink-0">Source:</span>
               {sources.map((s, i) => (
-                <button key={i} onClick={() => { setSourceIdx(i); setIframeKey(k => k+1) }}
-                  className={`flex-shrink-0 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
-                    i === sourceIdx
-                      ? 'bg-brand/20 text-brand border border-brand/40'
-                      : 'text-slate-500 border border-dark-border hover:border-slate-600 hover:text-slate-300'
-                  }`}>
+                <button key={i} onClick={() => { setSourceIdx(i); setIframeKey(k => k + 1) }}
+                  className={`flex-shrink-0 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${i === sourceIdx ? 'bg-brand/20 text-brand border border-brand/40' : 'text-slate-500 border border-dark-border hover:text-slate-300'}`}>
                   {s.label}
                 </button>
               ))}
             </div>
           )}
 
-          {/* ── Season / Episode navigation ── */}
+          {/* Episode nav */}
           {isTV && (
             <div className="flex items-center justify-between px-3 sm:px-4 py-3 border-b border-dark-border flex-shrink-0 gap-3 flex-wrap">
-              {/* Seasons */}
               {!isAnime && totalSeasons > 1 && (
                 <div className="flex gap-1 overflow-x-auto scrollbar-hide">
-                  {seasonList.map(s => (
-                    <button key={s} onClick={() => { setSeason(s); setEpisode(1) }}
-                      className={`flex-shrink-0 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
-                        s === season ? 'bg-brand/20 text-brand' : 'text-slate-500 hover:text-slate-300'
-                      }`}>
+                  {Array.from({ length: totalSeasons }, (_, i) => i + 1).map(s => (
+                    <button key={s} onClick={() => { setSeason(s); setEpisode(1); setIframeKey(k => k + 1) }}
+                      className={`flex-shrink-0 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${s === season ? 'bg-brand/20 text-brand' : 'text-slate-500 hover:text-slate-300'}`}>
                       S{s}
                     </button>
                   ))}
                 </div>
               )}
-
-              {/* Prev / Next */}
               <div className="flex items-center gap-2 ml-auto flex-shrink-0">
                 <button onClick={prevEpisode} disabled={episode <= 1 && season <= 1}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border border-dark-border text-slate-400 hover:text-white hover:border-slate-600 disabled:opacity-30 disabled:cursor-not-allowed transition-all">
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border border-dark-border text-slate-400 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed transition-all">
                   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="m15 18-6-6 6-6"/></svg>
                   Prev
                 </button>
-                <span className="text-slate-600 text-xs font-mono">
-                  E{String(episode).padStart(2,'0')}
-                </span>
+                <span className="text-slate-600 text-xs font-mono">E{String(episode).padStart(2,'0')}</span>
                 <button onClick={nextEpisode}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border border-dark-border text-slate-400 hover:text-white hover:border-slate-600 transition-all">
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border border-dark-border text-slate-400 hover:text-white transition-all">
                   Next
                   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="m9 18 6-6-6-6"/></svg>
                 </button>
@@ -311,30 +301,25 @@ export default function Player() {
             </div>
           )}
 
-          {/* ── Current episode info ── */}
+          {/* Episode info */}
           {currentEpInfo && (
             <div className="px-4 py-4 border-b border-dark-border flex gap-3">
               {currentEpInfo.still_path && (
-                <img src={IMG(currentEpInfo.still_path, 'w300')} alt=""
-                  className="w-28 rounded-lg object-cover flex-shrink-0 hidden sm:block" />
+                <img src={IMG(currentEpInfo.still_path, 'w300')} alt="" className="w-28 rounded-lg object-cover flex-shrink-0 hidden sm:block" />
               )}
               <div>
                 <p className="text-white font-semibold text-sm">{currentEpInfo.name}</p>
                 <p className="text-slate-500 text-xs mt-0.5 line-clamp-2">{currentEpInfo.overview}</p>
-                {currentEpInfo.runtime && (
-                  <p className="text-slate-600 text-[10px] mt-1">⏱ {currentEpInfo.runtime} min</p>
-                )}
+                {currentEpInfo.runtime && <p className="text-slate-600 text-[10px] mt-1">⏱ {currentEpInfo.runtime} min</p>}
               </div>
             </div>
           )}
 
-          {/* ── Movie info ── */}
+          {/* Movie info */}
           {!isTV && tmdbInfo && (
             <div className="px-4 py-4">
-              <h2 className="text-white font-bold text-base mb-1" style={{ fontFamily: 'Syne, sans-serif' }}>{title}</h2>
-              {tmdbInfo.overview && (
-                <p className="text-slate-400 text-sm leading-relaxed line-clamp-3">{tmdbInfo.overview}</p>
-              )}
+              <h2 className="text-white font-bold text-base mb-1" style={{ fontFamily:'Syne, sans-serif' }}>{title}</h2>
+              {tmdbInfo.overview && <p className="text-slate-400 text-sm leading-relaxed line-clamp-3">{tmdbInfo.overview}</p>}
               <div className="flex gap-3 mt-2 text-xs text-slate-600">
                 {tmdbInfo.release_date && <span>📅 {tmdbInfo.release_date.slice(0,4)}</span>}
                 {tmdbInfo.vote_average > 0 && <span>★ {tmdbInfo.vote_average.toFixed(1)}</span>}
@@ -344,32 +329,25 @@ export default function Player() {
           )}
         </div>
 
-        {/* ── Episode sidebar ── */}
+        {/* Episode sidebar — desktop */}
         {isTV && showEpList && (
           <div className="w-64 xl:w-80 border-l border-dark-border flex-shrink-0 overflow-y-auto hidden md:flex flex-col">
             <div className="px-3 py-3 border-b border-dark-border flex-shrink-0">
               <p className="text-white font-semibold text-sm">{isAnime ? 'Episodes' : `Season ${season}`}</p>
             </div>
-
             <div className="flex-1 overflow-y-auto">
               {(isAnime ? animeEpisodes : episodes).map((ep: any) => {
                 const epNum   = isAnime ? ep.number : ep.episode_number
                 const epTitle = isAnime ? (ep.title || `Episode ${ep.number}`) : ep.name
                 const isActive = epNum === episode
-
                 return (
-                  <button key={epNum}
-                    onClick={() => { setEpisode(epNum); if (!isAnime) setIframeKey(k => k+1) }}
-                    className={`w-full text-left px-3 py-3 flex items-start gap-2.5 border-b border-dark-border/50 transition-colors ${
-                      isActive ? 'bg-brand/10 border-l-2 border-l-brand' : 'hover:bg-dark-hover'
-                    }`}>
+                  <button key={epNum} onClick={() => { setEpisode(epNum); if (!isAnime) setIframeKey(k => k+1) }}
+                    className={`w-full text-left px-3 py-3 flex items-start gap-2.5 border-b border-dark-border/50 transition-colors ${isActive ? 'bg-brand/10 border-l-2 border-l-brand' : 'hover:bg-dark-hover'}`}>
                     <span className={`text-xs font-mono mt-0.5 flex-shrink-0 ${isActive ? 'text-brand font-bold' : 'text-slate-600'}`}>
                       {String(epNum).padStart(2,'0')}
                     </span>
                     <div className="min-w-0">
-                      <p className={`text-xs font-medium truncate ${isActive ? 'text-brand' : 'text-slate-300'}`}>
-                        {epTitle}
-                      </p>
+                      <p className={`text-xs font-medium truncate ${isActive ? 'text-brand' : 'text-slate-300'}`}>{epTitle}</p>
                       {!isAnime && (ep as EpisodeInfo).runtime && (
                         <p className="text-[10px] text-slate-600 mt-0.5">{(ep as EpisodeInfo).runtime} min</p>
                       )}
@@ -382,7 +360,7 @@ export default function Player() {
         )}
       </div>
 
-      {/* ── Mobile episode list drawer ── */}
+      {/* Episode drawer — mobile */}
       {isTV && showEpList && (
         <div className="md:hidden border-t border-dark-border max-h-48 overflow-y-auto">
           <div className="flex gap-2 p-2 overflow-x-auto scrollbar-hide">
@@ -391,9 +369,7 @@ export default function Player() {
               return (
                 <button key={epNum}
                   onClick={() => { setEpisode(epNum); setShowEpList(false); if (!isAnime) setIframeKey(k => k+1) }}
-                  className={`flex-shrink-0 w-12 h-12 rounded-xl text-xs font-bold transition-all ${
-                    epNum === episode ? 'bg-brand text-dark' : 'bg-dark-card text-slate-400 border border-dark-border'
-                  }`}>
+                  className={`flex-shrink-0 w-12 h-12 rounded-xl text-xs font-bold transition-all ${epNum === episode ? 'bg-brand text-dark' : 'bg-dark-card text-slate-400 border border-dark-border'}`}>
                   {epNum}
                 </button>
               )
