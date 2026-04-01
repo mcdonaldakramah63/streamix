@@ -1,208 +1,137 @@
-// backend/controllers/profileController.js — NEW FILE
-const Profile = require('../models/Profile')
-const axios   = require('axios')
+// backend/controllers/profileController.js — FULL REPLACEMENT
+const mongoose = require('mongoose')
 
-const TMDB_KEY  = () => process.env.TMDB_API_KEY
-const TMDB_BASE = 'https://api.themoviedb.org/3'
-const MAX_PROFILES = 5
+// ── Profile model (inline so it works even without a separate file) ───────────
+const profileSchema = new mongoose.Schema({
+  user:        { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+  name:        { type: String, required: true, trim: true, maxlength: 30 },
+  avatar:      { type: String, default: '🎬' },
+  color:       { type: String, default: '#14b8a6' },
+  isKids:      { type: Boolean, default: false },
+  watchHistory: [{
+    tmdbId:     Number,
+    title:      String,
+    type:       { type: String, enum: ['movie','tv'] },
+    genres:     [Number],
+    language:   String,
+    completed:  Boolean,
+    watchedAt:  { type: Date, default: Date.now },
+  }],
+}, { timestamps: true })
+
+const Profile = mongoose.models.Profile || mongoose.model('Profile', profileSchema)
 
 // ── GET /api/profiles ─────────────────────────────────────────────────────────
-exports.getAll = async (req, res) => {
+exports.getProfiles = async (req, res) => {
   try {
-    const profiles = await Profile.find({ userId: req.user._id })
-      .select('-watchHistory -preferences')
-      .sort('createdAt')
+    const profiles = await Profile.find({ user: req.user._id })
+      .select('-watchHistory')
+      .sort({ createdAt: 1 })
       .lean()
     res.json(profiles)
-  } catch (err) {
-    res.status(500).json({ message: err.message })
+  } catch (e) {
+    res.status(500).json({ message: e.message })
   }
 }
 
 // ── POST /api/profiles ────────────────────────────────────────────────────────
-exports.create = async (req, res) => {
+exports.createProfile = async (req, res) => {
   try {
-    const count = await Profile.countDocuments({ userId: req.user._id })
-    if (count >= MAX_PROFILES) {
-      return res.status(400).json({ message: `Maximum ${MAX_PROFILES} profiles allowed` })
-    }
+    const count = await Profile.countDocuments({ user: req.user._id })
+    if (count >= 5) return res.status(400).json({ message: 'Maximum 5 profiles per account' })
+
+    const { name, avatar = '🎬', color = '#14b8a6', isKids = false } = req.body
+    if (!name?.trim()) return res.status(400).json({ message: 'Profile name is required' })
+
     const profile = await Profile.create({
-      userId: req.user._id,
-      name:   req.body.name   || 'Profile',
-      avatar: req.body.avatar || '🎬',
-      color:  req.body.color  || '#14b8a6',
-      isKids: req.body.isKids || false,
+      user:   req.user._id,
+      name:   name.trim(),
+      avatar,
+      color,
+      isKids: Boolean(isKids),
     })
     res.status(201).json(profile)
-  } catch (err) {
-    res.status(500).json({ message: err.message })
+  } catch (e) {
+    res.status(500).json({ message: e.message })
   }
 }
 
-// ── PUT /api/profiles/:id ──────────────────────────────────────────────────────
-exports.update = async (req, res) => {
+// ── PUT /api/profiles/:id ─────────────────────────────────────────────────────
+exports.updateProfile = async (req, res) => {
   try {
-    const profile = await Profile.findOneAndUpdate(
-      { _id: req.params.id, userId: req.user._id },
-      { $set: { name: req.body.name, avatar: req.body.avatar, color: req.body.color, isKids: req.body.isKids } },
-      { new: true }
-    )
+    const profile = await Profile.findOne({ _id: req.params.id, user: req.user._id })
     if (!profile) return res.status(404).json({ message: 'Profile not found' })
+
+    const { name, avatar, color, isKids } = req.body
+    if (name  !== undefined) profile.name   = name.trim()
+    if (avatar!== undefined) profile.avatar = avatar
+    if (color !== undefined) profile.color  = color
+    if (isKids!== undefined) profile.isKids = Boolean(isKids)
+
+    await profile.save()
     res.json(profile)
-  } catch (err) {
-    res.status(500).json({ message: err.message })
+  } catch (e) {
+    res.status(500).json({ message: e.message })
   }
 }
 
-// ── DELETE /api/profiles/:id ───────────────────────────────────────────────────
-exports.remove = async (req, res) => {
+// ── DELETE /api/profiles/:id ──────────────────────────────────────────────────
+exports.deleteProfile = async (req, res) => {
   try {
-    const count = await Profile.countDocuments({ userId: req.user._id })
-    if (count <= 1) return res.status(400).json({ message: 'Cannot delete your only profile' })
-    await Profile.findOneAndDelete({ _id: req.params.id, userId: req.user._id })
-    res.json({ success: true })
-  } catch (err) {
-    res.status(500).json({ message: err.message })
+    const result = await Profile.findOneAndDelete({ _id: req.params.id, user: req.user._id })
+    if (!result) return res.status(404).json({ message: 'Profile not found' })
+    res.json({ message: 'Deleted' })
+  } catch (e) {
+    res.status(500).json({ message: e.message })
   }
 }
 
-// ── POST /api/profiles/:id/watch ──────────────────────────────────────────────
-// Records a watched item and updates genre preferences
+// ── POST /api/profiles/:id/watch ─────────────────────────────────────────────
 exports.recordWatch = async (req, res) => {
   try {
-    const { tmdbId, title, type, genres = [], language = 'en', completed = false } = req.body
-    if (!tmdbId) return res.status(400).json({ message: 'tmdbId required' })
-
-    const profile = await Profile.findOne({ _id: req.params.id, userId: req.user._id })
+    const profile = await Profile.findOne({ _id: req.params.id, user: req.user._id })
     if (!profile) return res.status(404).json({ message: 'Profile not found' })
 
-    // Add to history (keep last 200)
-    profile.watchHistory = profile.watchHistory.filter(w => w.tmdbId !== Number(tmdbId))
-    profile.watchHistory.unshift({ tmdbId: Number(tmdbId), title, type, genres, language, completed })
+    const { tmdbId, title, type, genres = [], language = 'en', completed = false } = req.body
+    if (!tmdbId || !type) return res.status(400).json({ message: 'tmdbId and type required' })
+
+    // Remove old entry for same title, add new one at front
+    profile.watchHistory = profile.watchHistory.filter(h => h.tmdbId !== Number(tmdbId))
+    profile.watchHistory.unshift({ tmdbId: Number(tmdbId), title, type, genres, language, completed, watchedAt: new Date() })
+    // Keep last 200
     if (profile.watchHistory.length > 200) profile.watchHistory = profile.watchHistory.slice(0, 200)
 
-    // Update genre scores
-    const prefs = profile.preferences.genres || new Map()
-    genres.forEach((gId: number) => {
-      const current = prefs.get(String(gId)) || 0
-      prefs.set(String(gId), current + (completed ? 2 : 1))
-    })
-    profile.preferences.genres = prefs
-
-    // Update language scores
-    const langPrefs = profile.preferences.languages || new Map()
-    const lCurrent  = langPrefs.get(language) || 0
-    langPrefs.set(language, lCurrent + 1)
-    profile.preferences.languages = langPrefs
-
-    profile.markModified('preferences')
     await profile.save()
-
-    res.json({ success: true })
-  } catch (err) {
-    res.status(500).json({ message: err.message })
+    res.json({ ok: true })
+  } catch (e) {
+    res.status(500).json({ message: e.message })
   }
 }
 
-// ── GET /api/profiles/:id/recommendations ─────────────────────────────────────
-// AI-ish recommendations based on watch history preferences
+// ── GET /api/profiles/:id/recommendations ────────────────────────────────────
 exports.getRecommendations = async (req, res) => {
   try {
-    const profile = await Profile.findOne({ _id: req.params.id, userId: req.user._id })
+    const profile = await Profile.findById(req.params.id).lean()
     if (!profile) return res.status(404).json({ message: 'Profile not found' })
 
-    const genreMap   = Object.fromEntries(profile.preferences.genres   || [])
-    const langMap    = Object.fromEntries(profile.preferences.languages || [])
-    const watchedIds = new Set(profile.watchHistory.map(w => w.tmdbId))
-
-    // Find top genres by score
-    const topGenres = Object.entries(genreMap)
-      .sort((a, b) => (b[1] as number) - (a[1] as number))
-      .slice(0, 3)
-      .map(([id]) => id)
-
-    const topLang = Object.entries(langMap)
-      .sort((a, b) => (b[1] as number) - (a[1] as number))
-      .slice(0, 1)
-      .map(([lang]) => lang)[0] || 'en'
-
-    // If no history — return popular
-    if (topGenres.length === 0) {
-      const { data } = await axios.get(`${TMDB_BASE}/trending/all/week?api_key=${TMDB_KEY()}&language=en-US`)
-      return res.json({ sections: [{ title: '🔥 Trending Now', items: data.results?.slice(0,20) || [] }] })
-    }
-
-    // Fetch recommendations for each top genre in parallel
-    const requests = topGenres.map(genreId =>
-      axios.get(`${TMDB_BASE}/discover/movie?api_key=${TMDB_KEY()}&with_genres=${genreId}&sort_by=popularity.desc&vote_count.gte=100&language=en-US&page=1`)
-        .then(r => ({ genreId, results: r.data.results || [] }))
-        .catch(() => ({ genreId, results: [] }))
-    )
-
-    // Also fetch "because you watched" — recommendations based on last watched
-    const lastWatched = profile.watchHistory[0]
-    let becauseYouWatched: any[] = []
-    if (lastWatched) {
-      try {
-        const endpoint = lastWatched.type === 'tv'
-          ? `${TMDB_BASE}/tv/${lastWatched.tmdbId}/recommendations`
-          : `${TMDB_BASE}/movie/${lastWatched.tmdbId}/recommendations`
-        const { data } = await axios.get(`${endpoint}?api_key=${TMDB_KEY()}&language=en-US`)
-        becauseYouWatched = (data.results || []).filter((r: any) => !watchedIds.has(r.id)).slice(0,20)
-      } catch { /* ignore */ }
-    }
-
-    // Fetch top picks for preferred language
-    const topPicksReq = topLang !== 'en'
-      ? axios.get(`${TMDB_BASE}/discover/movie?api_key=${TMDB_KEY()}&with_original_language=${topLang}&sort_by=popularity.desc&vote_count.gte=50`)
-          .then(r => r.data.results || []).catch(() => [])
-      : axios.get(`${TMDB_BASE}/movie/popular?api_key=${TMDB_KEY()}&language=en-US`)
-          .then(r => r.data.results || []).catch(() => [])
-
-    const [genreResults, topPicks] = await Promise.all([Promise.all(requests), topPicksReq])
-
-    const GENRE_NAMES: Record<string,string> = {
-      '28':'Action','12':'Adventure','16':'Animation','35':'Comedy','80':'Crime',
-      '18':'Drama','10749':'Romance','878':'Sci-Fi','27':'Horror','53':'Thriller',
-      '10751':'Family','14':'Fantasy','9648':'Mystery','10752':'War',
-    }
-
-    const sections: any[] = []
-
-    // Because you watched
-    if (becauseYouWatched.length > 0) {
-      sections.push({
-        title: `Because You Watched "${lastWatched.title}"`,
-        items: becauseYouWatched,
-      })
-    }
-
-    // Top picks
-    const filteredTopPicks = topPicks.filter((r: any) => !watchedIds.has(r.id)).slice(0, 20)
-    if (filteredTopPicks.length > 0) {
-      sections.push({ title: '⭐ Top Picks For You', items: filteredTopPicks })
-    }
-
-    // Genre rows
-    genreResults.forEach(({ genreId, results }) => {
-      const filtered = results.filter((r: any) => !watchedIds.has(r.id)).slice(0,20)
-      if (filtered.length > 0) {
-        sections.push({
-          title: `More ${GENRE_NAMES[genreId] || 'Popular'} For You`,
-          items: filtered,
-        })
+    // Score genres by watch frequency
+    const genreScore: Record<number, number> = {}
+    for (const h of profile.watchHistory.slice(0, 50)) {
+      for (const g of (h.genres || [])) {
+        genreScore[g] = (genreScore[g] || 0) + (h.completed ? 2 : 1)
       }
-    })
-
-    // Add trending as fallback if not enough sections
-    if (sections.length < 2) {
-      const { data } = await axios.get(`${TMDB_BASE}/trending/all/week?api_key=${TMDB_KEY()}`)
-      sections.push({ title: '🔥 Trending Now', items: data.results?.slice(0,20) || [] })
     }
 
-    res.json({ sections, topGenres, watchedCount: watchedIds.size })
-  } catch (err) {
-    console.error('[Recommendations]', err)
-    res.status(500).json({ message: 'Recommendations failed', error: (err as any).message })
+    const topGenres = Object.entries(genreScore)
+      .sort((a, b) => Number(b[1]) - Number(a[1]))
+      .slice(0, 3)
+      .map(([id]) => Number(id))
+
+    const watchedIds = profile.watchHistory.slice(0, 100).map(h => h.tmdbId)
+    const lastWatched = profile.watchHistory.slice(0, 3)
+
+    res.json({ topGenres, watchedIds, lastWatched })
+  } catch (e) {
+    res.status(500).json({ message: e.message })
   }
 }

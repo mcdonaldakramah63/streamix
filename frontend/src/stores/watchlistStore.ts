@@ -1,9 +1,8 @@
 // frontend/src/stores/watchlistStore.ts — FULL REPLACEMENT
-// FIX: correct API endpoint, proper auth header, optimistic updates, error recovery
+// FIX: correct API request body fields, proper auth check, optimistic rollback on failure
 import { create } from 'zustand'
 import api from '../services/api'
 
-// ── Types ─────────────────────────────────────────────────────────────────────
 export interface WLItem {
   movieId:  number
   title:    string
@@ -16,58 +15,46 @@ export interface WLItem {
 }
 
 interface WLState {
-  items:    WLItem[]
-  loading:  boolean
-  synced:   boolean
-  fetch:    () => Promise<void>
-  add:      (item: Omit<WLItem, 'addedAt'>) => Promise<void>
-  remove:   (movieId: number) => Promise<void>
-  toggle:   (item: Omit<WLItem, 'addedAt'>) => Promise<void>
-  isIn:     (movieId: number) => boolean
-  clear:    () => void
+  items:   WLItem[]
+  loading: boolean
+  synced:  boolean
+  fetch:   () => Promise<void>
+  add:     (item: Omit<WLItem, 'addedAt'>) => Promise<void>
+  remove:  (movieId: number) => Promise<void>
+  toggle:  (item: Omit<WLItem, 'addedAt'>) => Promise<void>
+  isIn:    (movieId: number) => boolean
+  clear:   () => void
 }
 
-// ── LocalStorage helpers ──────────────────────────────────────────────────────
 const LS_KEY = 'streamix_watchlist_v2'
 
 function loadLocal(): WLItem[] {
   try { return JSON.parse(localStorage.getItem(LS_KEY) || '[]') } catch { return [] }
 }
-
 function saveLocal(items: WLItem[]) {
-  try { localStorage.setItem(LS_KEY, JSON.stringify(items)) } catch { /* quota exceeded */ }
+  try { localStorage.setItem(LS_KEY, JSON.stringify(items)) } catch {}
 }
-
 function getToken(): string | null {
-  try {
-    const u = JSON.parse(localStorage.getItem('streamix_user') || '{}')
-    return u?.token || null
-  } catch { return null }
+  try { return JSON.parse(localStorage.getItem('streamix_user') || '{}')?.token || null } catch { return null }
 }
 
-// ── Store ─────────────────────────────────────────────────────────────────────
 export const useWatchlistStore = create<WLState>((set, get) => ({
   items:   loadLocal(),
   loading: false,
   synced:  false,
 
-  // ── Fetch from backend ────────────────────────────────────────────────────
   fetch: async () => {
-    if (!getToken()) {
-      set({ items: loadLocal(), synced: true })
-      return
-    }
+    if (!getToken()) { set({ items: loadLocal(), synced: true }); return }
     set({ loading: true })
     try {
       const { data } = await api.get('/watchlist')
-      // Backend returns array of watchlist docs with movieId field
-      const items: WLItem[] = (Array.isArray(data) ? data : data.watchlist || []).map((d: any) => ({
-        movieId:  Number(d.movieId || d.id),
+      const items: WLItem[] = (Array.isArray(data) ? data : []).map((d: any) => ({
+        movieId:  Number(d.movieId),
         title:    d.title    || '',
         poster:   d.poster   || '',
         backdrop: d.backdrop || '',
-        rating:   Number(d.rating || d.vote_average || 0),
-        year:     d.year     || d.release_date?.slice(0,4) || '',
+        rating:   Number(d.rating) || 0,
+        year:     d.year     || '',
         type:     d.type     || 'movie',
         addedAt:  d.addedAt  ? new Date(d.addedAt).getTime() : Date.now(),
       }))
@@ -76,23 +63,14 @@ export const useWatchlistStore = create<WLState>((set, get) => ({
     } catch (e: any) {
       console.warn('[WL] fetch failed:', e?.response?.status)
       set({ items: loadLocal(), synced: true })
-    } finally {
-      set({ loading: false })
-    }
+    } finally { set({ loading: false }) }
   },
 
-  // ── Add ───────────────────────────────────────────────────────────────────
   add: async (item) => {
+    // Optimistic add
+    if (get().isIn(item.movieId)) return
     const entry: WLItem = { ...item, addedAt: Date.now() }
-
-    // Optimistic update
-    if (!get().items.some(i => i.movieId === item.movieId)) {
-      set(s => {
-        const items = [entry, ...s.items]
-        saveLocal(items)
-        return { items }
-      })
-    }
+    set(s => { const items = [entry, ...s.items]; saveLocal(items); return { items } })
 
     if (!getToken()) return
     try {
@@ -106,51 +84,37 @@ export const useWatchlistStore = create<WLState>((set, get) => ({
         type:     entry.type     || 'movie',
       })
     } catch (e: any) {
-      console.warn('[WL] add failed:', e?.response?.status)
-      // Rollback on failure
-      if (e?.response?.status !== 409) { // 409 = already exists, don't rollback
-        set(s => {
-          const items = s.items.filter(i => i.movieId !== item.movieId)
-          saveLocal(items)
-          return { items }
-        })
+      const status = e?.response?.status
+      if (status !== 409) {
+        // Rollback
+        set(s => { const items = s.items.filter(i => i.movieId !== item.movieId); saveLocal(items); return { items } })
       }
+      console.warn('[WL] add failed:', status)
     }
   },
 
-  // ── Remove ────────────────────────────────────────────────────────────────
   remove: async (movieId) => {
-    // Optimistic update
     const prev = get().items
-    set(s => {
-      const items = s.items.filter(i => i.movieId !== movieId)
-      saveLocal(items)
-      return { items }
-    })
+    set(s => { const items = s.items.filter(i => i.movieId !== movieId); saveLocal(items); return { items } })
 
     if (!getToken()) return
     try {
       await api.delete(`/watchlist/${movieId}`)
     } catch (e: any) {
       console.warn('[WL] remove failed:', e?.response?.status)
-      // Rollback on failure
+      // Rollback
       set(() => { saveLocal(prev); return { items: prev } })
     }
   },
 
-  // ── Toggle (add if not in, remove if in) ──────────────────────────────────
   toggle: async (item) => {
     const { isIn, add, remove } = get()
     if (isIn(item.movieId)) await remove(item.movieId)
     else                     await add(item)
   },
 
-  // ── Check ─────────────────────────────────────────────────────────────────
-  isIn: (movieId) => get().items.some(i => i.movieId === movieId),
-
-  // ── Clear ─────────────────────────────────────────────────────────────────
+  isIn:  (movieId) => get().items.some(i => i.movieId === movieId),
   clear: () => { saveLocal([]); set({ items: [], synced: false }) },
 }))
 
-// Named exports for backward compatibility
 export default useWatchlistStore

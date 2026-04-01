@@ -1,212 +1,389 @@
 // frontend/src/pages/Profile.tsx — FULL REPLACEMENT
 import { useEffect, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { useAuthStore } from '../context/authStore'
-import { useContinueWatching } from '../stores/continueWatchingStore'
-import { useWatchlistStore }   from '../stores/watchlistStore'
-import api from '../services/api'
+import { useNavigate }         from 'react-router-dom'
+import { useAuthStore }        from '../context/authStore'
+import { useProfileStore }     from '../stores/profileStore'
+import api                     from '../services/api'
 
-export default function Profile() {
-  const navigate  = useNavigate()
-  const { user, logout, setUser } = useAuthStore()
-  const { items: cwItems }  = useContinueWatching()
-  const { items: wlItems }  = useWatchlistStore()
+const AVATARS = ['🎬','📺','🎌','🎭','🚀','👻','💕','⚔️','🧙','🔍','🎵','🌍','👨‍👩‍👧','🎨','😂','🦸','🐉','🏆']
+const COLORS  = ['#14b8a6','#8b5cf6','#f59e0b','#ef4444','#3b82f6','#10b981','#f97316','#ec4899','#6366f1','#84cc16']
 
-  const [tab,     setTab]     = useState<'overview'|'settings'>('overview')
-  const [form,    setForm]    = useState({ username: '', currentPassword: '', newPassword: '', confirmPassword: '' })
-  const [saving,  setSaving]  = useState(false)
-  const [msg,     setMsg]     = useState<{ text: string; type: 'success'|'error' } | null>(null)
+interface FormState { name:string; avatar:string; color:string; isKids:boolean }
 
-  useEffect(() => {
-    if (!user) { navigate('/login'); return }
-    setForm(f => ({ ...f, username: user.username }))
-  }, [user])
+function ProfileCard({
+  profile, isActive, onSelect, onEdit, onDelete,
+}: {
+  profile:any; isActive:boolean; onSelect:()=>void; onEdit:()=>void; onDelete:()=>void
+}) {
+  return (
+    <div className={`card p-4 transition-all cursor-pointer ${isActive ? 'ring-2 ring-brand' : 'hover:border-slate-600'}`}
+      onClick={onSelect}>
+      <div className="flex items-center gap-3 mb-3">
+        <div className="w-12 h-12 rounded-2xl flex items-center justify-center text-2xl flex-shrink-0"
+          style={{ background: (profile.color || '#14b8a6') + '25' }}>
+          {profile.avatar || '🎬'}
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2">
+            <p className="text-sm font-bold text-white truncate">{profile.name}</p>
+            {isActive && <span className="text-[10px] bg-brand/20 text-brand px-1.5 py-0.5 rounded-full font-bold">Active</span>}
+          </div>
+          <div className="flex items-center gap-1.5 mt-0.5">
+            {profile.isKids && <span className="text-[10px] bg-yellow-400/20 text-yellow-300 px-1.5 py-0.5 rounded-full font-bold">KIDS</span>}
+          </div>
+        </div>
+      </div>
+      <div className="flex gap-2" onClick={e => e.stopPropagation()}>
+        <button onClick={onSelect}
+          className={`flex-1 py-1.5 rounded-lg text-xs font-semibold transition-all ${isActive ? 'bg-brand/15 text-brand border border-brand/30' : 'btn-secondary'}`}>
+          {isActive ? '✓ Active' : 'Switch To'}
+        </button>
+        <button onClick={onEdit}
+          className="px-3 py-1.5 rounded-lg text-xs font-semibold text-slate-400 border border-dark-border hover:border-slate-500 hover:text-white transition-all">
+          Edit
+        </button>
+        <button onClick={onDelete}
+          className="px-3 py-1.5 rounded-lg text-xs font-semibold text-red-400/70 border border-dark-border hover:border-red-500/40 hover:text-red-400 transition-all">
+          ✕
+        </button>
+      </div>
+    </div>
+  )
+}
 
-  if (!user) return null
-
-  const handleSave = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (form.newPassword && form.newPassword !== form.confirmPassword) {
-      setMsg({ text: 'Passwords do not match', type: 'error' }); return
-    }
-    setSaving(true); setMsg(null)
-    try {
-      const payload: any = {}
-      if (form.username !== user.username) payload.username = form.username
-      if (form.newPassword) { payload.currentPassword = form.currentPassword; payload.newPassword = form.newPassword }
-      if (!Object.keys(payload).length) { setMsg({ text: 'Nothing to update', type: 'error' }); setSaving(false); return }
-      const { data } = await api.put('/users/update', payload)
-      setUser({ ...user, ...data })
-      setMsg({ text: 'Profile updated!', type: 'success' })
-      setForm(f => ({ ...f, currentPassword: '', newPassword: '', confirmPassword: '' }))
-    } catch (err: any) {
-      setMsg({ text: err?.response?.data?.message || 'Update failed', type: 'error' })
-    } finally { setSaving(false) }
-  }
-
-  const stats = [
-    { label: 'Watching',    value: cwItems.length,                  icon: '▶' },
-    { label: 'Watchlist',   value: wlItems.length,                  icon: '🔖' },
-    { label: 'Completed',   value: cwItems.filter(i => i.progress >= 90).length, icon: '✓' },
-    { label: 'Member Since',value: '2024',                          icon: '📅' },
-  ]
+function ProfileForm({
+  initial, onSave, onCancel, loading,
+}: {
+  initial:FormState; onSave:(f:FormState)=>void; onCancel:()=>void; loading:boolean
+}) {
+  const [form, setForm] = useState<FormState>(initial)
 
   return (
-    <div className="pt-16 min-h-screen px-3 sm:px-6 py-6">
-      <div className="max-w-2xl mx-auto">
+    <div className="space-y-4">
+      {/* Name */}
+      <div>
+        <label className="text-xs font-bold uppercase tracking-wider text-slate-500 block mb-1.5">Profile Name</label>
+        <input
+          value={form.name}
+          onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
+          placeholder="e.g. Kwame, Kids, Mum…"
+          maxLength={30}
+          className="input w-full"
+          autoFocus
+        />
+      </div>
 
-        {/* Profile header */}
-        <div className="card p-6 mb-6 flex items-center gap-5">
-          {/* Avatar */}
-          <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-2xl bg-brand/15 flex items-center justify-center flex-shrink-0 border border-brand/20">
-            <span className="text-brand font-bold text-2xl sm:text-3xl" style={{ fontFamily:'Syne, sans-serif' }}>
-              {user.username[0].toUpperCase()}
-            </span>
-          </div>
-
-          <div className="flex-1 min-w-0">
-            <h1 className="text-xl sm:text-2xl font-bold text-white" style={{ fontFamily:'Syne, sans-serif' }}>
-              {user.username}
-            </h1>
-            <p className="text-slate-500 text-sm">{user.email}</p>
-            {user.isAdmin && (
-              <span className="badge-brand text-[11px] mt-1.5">👑 Admin</span>
-            )}
-          </div>
-
-          <button onClick={() => { logout(); navigate('/') }}
-            className="btn-ghost text-red-400 hover:text-red-300 text-sm flex-shrink-0">
-            Sign Out
-          </button>
-        </div>
-
-        {/* Stats */}
-        <div className="grid grid-cols-4 gap-2 sm:gap-3 mb-6">
-          {stats.map(s => (
-            <div key={s.label} className="card p-3 sm:p-4 text-center">
-              <div className="text-xl sm:text-2xl mb-1">{s.icon}</div>
-              <div className="text-lg sm:text-2xl font-bold text-white" style={{ fontFamily:'Syne, sans-serif' }}>
-                {s.value}
-              </div>
-              <div className="text-[10px] sm:text-xs text-slate-500 mt-0.5">{s.label}</div>
-            </div>
-          ))}
-        </div>
-
-        {/* Tabs */}
-        <div className="flex gap-1 bg-dark-surface border border-dark-border rounded-xl p-1 mb-6 w-fit">
-          {[
-            { key: 'overview', label: '📊 Overview' },
-            { key: 'settings', label: '⚙️ Settings' },
-          ].map(t => (
-            <button key={t.key} onClick={() => setTab(t.key as any)}
-              className={`px-4 py-2 rounded-lg text-xs font-semibold transition-all ${
-                tab === t.key ? 'bg-brand text-dark' : 'text-slate-400 hover:text-white'
+      {/* Avatar */}
+      <div>
+        <label className="text-xs font-bold uppercase tracking-wider text-slate-500 block mb-1.5">Avatar</label>
+        <div className="flex flex-wrap gap-2">
+          {AVATARS.map(a => (
+            <button key={a} type="button" onClick={() => setForm(f => ({ ...f, avatar: a }))}
+              className={`w-10 h-10 rounded-xl text-xl flex items-center justify-center transition-all ${
+                form.avatar === a ? 'ring-2 ring-brand bg-brand/15 scale-110' : 'bg-dark-surface hover:bg-dark-hover'
               }`}>
-              {t.label}
+              {a}
             </button>
           ))}
         </div>
+      </div>
 
-        {/* Overview tab */}
-        {tab === 'overview' && (
-          <div className="space-y-4 animate-fade-in">
-            {/* Recent CW */}
-            {cwItems.length > 0 && (
-              <div className="card p-5">
-                <h3 className="text-sm font-bold text-white mb-3">Recently Watched</h3>
-                <div className="space-y-3">
-                  {cwItems.slice(0,5).map(item => (
-                    <div key={item.movieId}
-                      onClick={() => navigate(item.type === 'tv' ? `/tv/${item.movieId}` : `/movie/${item.movieId}`)}
-                      className="flex items-center gap-3 cursor-pointer hover:bg-dark-hover rounded-xl p-2 -mx-2 transition-colors">
-                      {item.poster && (
-                        <img src={`https://image.tmdb.org/t/p/w92${item.poster}`} alt=""
-                          className="w-10 h-14 object-cover rounded-lg flex-shrink-0" />
-                      )}
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-semibold text-white truncate">{item.title}</p>
-                        {item.type === 'tv' && item.season && (
-                          <p className="text-xs text-slate-500">S{item.season}·E{item.episode}</p>
-                        )}
-                        <div className="mt-1.5 h-1 bg-dark-border rounded-full overflow-hidden w-full max-w-[140px]">
-                          <div className="h-full bg-brand rounded-full" style={{ width:`${item.progress}%` }} />
-                        </div>
-                      </div>
-                      <span className="text-xs text-slate-600">{item.progress}%</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
+      {/* Color */}
+      <div>
+        <label className="text-xs font-bold uppercase tracking-wider text-slate-500 block mb-1.5">Color</label>
+        <div className="flex gap-2 flex-wrap">
+          {COLORS.map(c => (
+            <button key={c} type="button" onClick={() => setForm(f => ({ ...f, color: c }))}
+              className={`w-8 h-8 rounded-full transition-all ${form.color === c ? 'ring-2 ring-white scale-110' : ''}`}
+              style={{ background: c }} />
+          ))}
+        </div>
+      </div>
 
-            {/* Quick links */}
-            <div className="card p-5">
-              <h3 className="text-sm font-bold text-white mb-3">Quick Actions</h3>
-              <div className="space-y-1">
-                {[
-                  { label: 'My Watchlist',      icon: '🔖', to: '/watchlist' },
-                  { label: 'Browse Movies',     icon: '🎬', to: '/' },
-                  { label: 'Browse Anime',      icon: '🎌', to: '/anime' },
-                  ...(user.isAdmin ? [{ label: 'Admin Dashboard', icon: '👑', to: '/admin' }] : []),
-                ].map(({ label, icon, to }) => (
-                  <button key={to} onClick={() => navigate(to)}
-                    className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm text-slate-300 hover:bg-dark-hover hover:text-white transition-all text-left">
-                    <span>{icon}</span> {label}
-                    <svg className="ml-auto" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <path d="m9 18 6-6-6-6"/>
-                    </svg>
-                  </button>
-                ))}
-              </div>
+      {/* Kids mode */}
+      <div>
+        <label className="text-xs font-bold uppercase tracking-wider text-slate-500 block mb-2">Kids Mode</label>
+        <button type="button" onClick={() => setForm(f => ({ ...f, isKids: !f.isKids }))}
+          className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl border transition-all ${
+            form.isKids ? 'bg-yellow-400/10 border-yellow-400/40 text-yellow-300' : 'border-dark-border text-slate-400 hover:border-slate-500'
+          }`}>
+          <div className={`w-10 h-6 rounded-full relative transition-colors flex-shrink-0 ${form.isKids ? 'bg-yellow-400' : 'bg-dark-border'}`}>
+            <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-transform ${form.isKids ? 'translate-x-5' : 'translate-x-1'}`} />
+          </div>
+          <div className="text-left">
+            <p className="text-sm font-semibold">{form.isKids ? '🌟 Kids Mode ON' : 'Kids Mode OFF'}</p>
+            <p className="text-xs opacity-60">
+              {form.isKids ? 'Safe content only, parental PIN to exit' : 'All content available'}
+            </p>
+          </div>
+        </button>
+      </div>
+
+      {/* Preview */}
+      <div className="p-3 rounded-xl bg-dark-surface border border-dark-border">
+        <p className="text-[10px] font-bold uppercase tracking-wider text-slate-600 mb-2">Preview</p>
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl flex items-center justify-center text-2xl"
+            style={{ background: (form.color || '#14b8a6') + '25' }}>
+            {form.avatar}
+          </div>
+          <div>
+            <p className="text-sm font-bold text-white">{form.name || 'Untitled'}</p>
+            <div className="flex gap-1 mt-0.5">
+              {form.isKids && <span className="text-[10px] bg-yellow-400/20 text-yellow-300 px-1.5 py-0.5 rounded-full font-bold">KIDS</span>}
             </div>
           </div>
-        )}
+        </div>
+      </div>
 
-        {/* Settings tab */}
-        {tab === 'settings' && (
-          <div className="card p-5 sm:p-6 animate-fade-in">
-            <h3 className="text-sm font-bold text-white mb-5">Account Settings</h3>
+      {/* Buttons */}
+      <div className="flex gap-2">
+        <button type="button" onClick={onCancel} className="btn-secondary flex-1 py-2.5">Cancel</button>
+        <button type="button"
+          onClick={() => onSave(form)}
+          disabled={loading || !form.name.trim()}
+          className="btn-primary flex-1 py-2.5 disabled:opacity-60">
+          {loading ? <div className="w-4 h-4 border-2 border-dark/30 border-t-dark rounded-full animate-spin mx-auto" /> : 'Save Profile'}
+        </button>
+      </div>
+    </div>
+  )
+}
 
-            {msg && (
-              <div className={`px-4 py-3 rounded-xl text-sm mb-5 animate-slide-down ${
-                msg.type === 'success'
-                  ? 'bg-brand/10 border border-brand/30 text-brand'
-                  : 'bg-red-500/10 border border-red-500/30 text-red-400'
-              }`}>
-                {msg.text}
-              </div>
-            )}
+export default function Profile() {
+  const navigate     = useNavigate()
+  const { user, setUser, logout } = useAuthStore()
+  const { profiles, activeProfile, fetch: fetchProfiles, create, update, remove, setActive } = useProfileStore()
 
-            <form onSubmit={handleSave} className="space-y-5">
-              <div>
-                <label className="block text-xs font-bold uppercase tracking-widest text-slate-500 mb-1.5">Username</label>
-                <input type="text" value={form.username} onChange={e => setForm(f => ({ ...f, username: e.target.value }))}
-                  className="input" />
-              </div>
+  const [tab,         setTab]         = useState<'profiles'|'account'>('profiles')
+  const [editTarget,  setEditTarget]  = useState<any>(null)   // profile being edited
+  const [showCreate,  setShowCreate]  = useState(false)
+  const [formLoading, setFormLoading] = useState(false)
+  const [deleteConfirm, setDeleteConfirm] = useState<string|null>(null)
 
-              <div className="border-t border-dark-border pt-5">
-                <p className="text-xs font-bold uppercase tracking-widest text-slate-500 mb-4">Change Password</p>
-                <div className="space-y-3">
-                  <input type="password" value={form.currentPassword}
-                    onChange={e => setForm(f => ({ ...f, currentPassword: e.target.value }))}
-                    placeholder="Current password" className="input" />
-                  <input type="password" value={form.newPassword}
-                    onChange={e => setForm(f => ({ ...f, newPassword: e.target.value }))}
-                    placeholder="New password" className="input" />
-                  <input type="password" value={form.confirmPassword}
-                    onChange={e => setForm(f => ({ ...f, confirmPassword: e.target.value }))}
-                    placeholder="Confirm new password" className="input" />
+  // Account settings
+  const [username, setUsername] = useState(user?.username || '')
+  const [email,    setEmail]    = useState(user?.email    || '')
+  const [pwForm,   setPwForm]   = useState({ current:'', next:'', confirm:'' })
+  const [acctMsg,  setAcctMsg]  = useState('')
+  const [acctErr,  setAcctErr]  = useState('')
+  const [acctLoad, setAcctLoad] = useState(false)
+
+  useEffect(() => { if (user) fetchProfiles() }, [user?._id])
+
+  if (!user) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="text-center">
+          <p className="text-slate-400 mb-4">Sign in to manage your profile</p>
+          <button onClick={() => navigate('/login')} className="btn-primary px-6 py-2.5">Sign In</button>
+        </div>
+      </div>
+    )
+  }
+
+  const handleCreateSave = async (form: FormState) => {
+    if (!form.name.trim()) return
+    setFormLoading(true)
+    try {
+      await create(form)
+      setShowCreate(false)
+      await fetchProfiles()
+    } catch (e: any) {
+      alert(e?.response?.data?.message || 'Failed to create profile')
+    } finally { setFormLoading(false) }
+  }
+
+  const handleEditSave = async (form: FormState) => {
+    if (!form.name.trim() || !editTarget) return
+    setFormLoading(true)
+    try {
+      await update(editTarget._id, form)
+      setEditTarget(null)
+      await fetchProfiles()
+    } catch (e: any) {
+      alert(e?.response?.data?.message || 'Failed to update profile')
+    } finally { setFormLoading(false) }
+  }
+
+  const handleDelete = async (id: string) => {
+    try {
+      await remove(id)
+      setDeleteConfirm(null)
+    } catch (e: any) {
+      alert(e?.response?.data?.message || 'Failed to delete profile')
+    }
+  }
+
+  const saveAccount = async () => {
+    setAcctLoad(true); setAcctMsg(''); setAcctErr('')
+    try {
+      const { data } = await api.put('/users/profile', { username: username.trim(), email: email.trim() })
+      setUser({ ...user, ...data })
+      setAcctMsg('Account updated!')
+    } catch (e: any) {
+      setAcctErr(e?.response?.data?.message || 'Update failed')
+    } finally { setAcctLoad(false) }
+  }
+
+  const changePassword = async () => {
+    if (pwForm.next !== pwForm.confirm) return setAcctErr('Passwords do not match')
+    if (pwForm.next.length < 8)         return setAcctErr('Password must be at least 8 characters')
+    setAcctLoad(true); setAcctMsg(''); setAcctErr('')
+    try {
+      await api.put('/users/password', { currentPassword: pwForm.current, newPassword: pwForm.next })
+      setPwForm({ current:'', next:'', confirm:'' })
+      setAcctMsg('Password changed!')
+    } catch (e: any) {
+      setAcctErr(e?.response?.data?.message || 'Failed to change password')
+    } finally { setAcctLoad(false) }
+  }
+
+  return (
+    <div className="min-h-screen pt-20 px-4 sm:px-6 max-w-3xl mx-auto pb-16">
+
+      {/* Page header */}
+      <div className="flex items-center gap-3 mb-6">
+        <div className="w-14 h-14 rounded-2xl bg-brand/20 flex items-center justify-center text-brand font-black text-2xl flex-shrink-0">
+          {(activeProfile?.avatar || user.username?.[0] || 'U').slice(0,2)}
+        </div>
+        <div>
+          <h1 className="text-xl font-black text-white" style={{ fontFamily:'Syne, sans-serif' }}>
+            {activeProfile?.name || user.username}
+          </h1>
+          <p className="text-slate-500 text-sm">{user.email}</p>
+        </div>
+      </div>
+
+      {/* Tabs */}
+      <div className="flex gap-1 p-1 rounded-xl mb-6" style={{ background:'rgba(255,255,255,0.04)', border:'1px solid rgba(255,255,255,0.06)' }}>
+        {(['profiles','account'] as const).map(t => (
+          <button key={t} onClick={() => setTab(t)}
+            className={`flex-1 py-2 rounded-lg text-sm font-semibold capitalize transition-all ${
+              tab===t ? 'bg-dark-card text-white shadow' : 'text-slate-400 hover:text-white'
+            }`}>
+            {t === 'profiles' ? '👤 Profiles' : '⚙️ Account'}
+          </button>
+        ))}
+      </div>
+
+      {/* ── Profiles tab ── */}
+      {tab === 'profiles' && (
+        <div>
+          {/* Profile list */}
+          <div className="space-y-3 mb-4">
+            {profiles.map(p => (
+              <ProfileCard key={p._id} profile={p}
+                isActive={activeProfile?._id === p._id}
+                onSelect={() => setActive(p)}
+                onEdit={() => { setEditTarget(p); setShowCreate(false) }}
+                onDelete={() => setDeleteConfirm(p._id)}
+              />
+            ))}
+          </div>
+
+          {/* Add profile button */}
+          {profiles.length < 5 && !showCreate && !editTarget && (
+            <button onClick={() => { setShowCreate(true); setEditTarget(null) }}
+              className="w-full py-3 rounded-2xl border-2 border-dashed border-dark-border text-slate-500 hover:border-brand/50 hover:text-brand text-sm font-semibold flex items-center justify-center gap-2 transition-all">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M12 5v14M5 12h14"/>
+              </svg>
+              Add Profile ({profiles.length}/5)
+            </button>
+          )}
+
+          {/* Create form */}
+          {showCreate && (
+            <div className="card p-4 mt-3">
+              <h3 className="text-base font-bold text-white mb-4" style={{ fontFamily:'Syne, sans-serif' }}>New Profile</h3>
+              <ProfileForm
+                initial={{ name:'', avatar:'🎬', color:'#14b8a6', isKids:false }}
+                onSave={handleCreateSave}
+                onCancel={() => setShowCreate(false)}
+                loading={formLoading}
+              />
+            </div>
+          )}
+
+          {/* Edit form */}
+          {editTarget && (
+            <div className="card p-4 mt-3">
+              <h3 className="text-base font-bold text-white mb-4" style={{ fontFamily:'Syne, sans-serif' }}>
+                Edit: {editTarget.name}
+              </h3>
+              <ProfileForm
+                initial={{ name:editTarget.name, avatar:editTarget.avatar||'🎬', color:editTarget.color||'#14b8a6', isKids:!!editTarget.isKids }}
+                onSave={handleEditSave}
+                onCancel={() => setEditTarget(null)}
+                loading={formLoading}
+              />
+            </div>
+          )}
+
+          {/* Delete confirm */}
+          {deleteConfirm && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
+              <div className="card p-5 max-w-sm w-full">
+                <p className="text-white font-bold mb-1">Delete this profile?</p>
+                <p className="text-slate-500 text-sm mb-4">All watch history for this profile will be lost.</p>
+                <div className="flex gap-2">
+                  <button onClick={() => setDeleteConfirm(null)} className="btn-secondary flex-1 py-2">Cancel</button>
+                  <button onClick={() => handleDelete(deleteConfirm)} className="flex-1 py-2 bg-red-500/20 text-red-400 rounded-xl font-semibold hover:bg-red-500/30 border border-red-500/30 transition-all">Delete</button>
                 </div>
               </div>
+            </div>
+          )}
+        </div>
+      )}
 
-              <button type="submit" disabled={saving} className="btn-primary w-full py-3 font-semibold disabled:opacity-60">
-                {saving ? <div className="w-5 h-5 border-2 border-dark/30 border-t-dark rounded-full animate-spin" /> : 'Save Changes'}
+      {/* ── Account tab ── */}
+      {tab === 'account' && (
+        <div className="space-y-4">
+          <div className="card p-4">
+            <h3 className="text-sm font-bold uppercase tracking-wider text-slate-500 mb-4">Account Info</h3>
+            <div className="space-y-3">
+              <div>
+                <label className="text-xs text-slate-500 block mb-1">Username</label>
+                <input value={username} onChange={e => setUsername(e.target.value)} className="input w-full" placeholder="Username"/>
+              </div>
+              <div>
+                <label className="text-xs text-slate-500 block mb-1">Email</label>
+                <input value={email} onChange={e => setEmail(e.target.value)} type="email" className="input w-full" placeholder="Email"/>
+              </div>
+              {acctMsg && <p className="text-green-400 text-sm">{acctMsg}</p>}
+              {acctErr && <p className="text-red-400 text-sm">{acctErr}</p>}
+              <button onClick={saveAccount} disabled={acctLoad} className="btn-primary w-full py-2.5 disabled:opacity-60">
+                {acctLoad ? 'Saving…' : 'Save Changes'}
               </button>
-            </form>
+            </div>
           </div>
-        )}
-      </div>
+
+          <div className="card p-4">
+            <h3 className="text-sm font-bold uppercase tracking-wider text-slate-500 mb-4">Change Password</h3>
+            <div className="space-y-3">
+              <input value={pwForm.current} onChange={e => setPwForm(f=>({...f,current:e.target.value}))}
+                type="password" placeholder="Current password" className="input w-full"/>
+              <input value={pwForm.next} onChange={e => setPwForm(f=>({...f,next:e.target.value}))}
+                type="password" placeholder="New password (min 8 chars)" className="input w-full"/>
+              <input value={pwForm.confirm} onChange={e => setPwForm(f=>({...f,confirm:e.target.value}))}
+                type="password" placeholder="Confirm new password" className="input w-full"/>
+              <button onClick={changePassword} disabled={acctLoad || !pwForm.current || !pwForm.next}
+                className="btn-primary w-full py-2.5 disabled:opacity-60">
+                {acctLoad ? 'Changing…' : 'Change Password'}
+              </button>
+            </div>
+          </div>
+
+          <div className="card p-4 border-red-500/20">
+            <h3 className="text-sm font-bold uppercase tracking-wider text-red-400/70 mb-3">Danger Zone</h3>
+            <button onClick={() => { logout(); navigate('/') }}
+              className="w-full py-2.5 rounded-xl text-sm font-semibold text-red-400 border border-red-500/30 hover:bg-red-500/10 transition-all">
+              Sign Out
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
