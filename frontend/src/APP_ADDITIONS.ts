@@ -1,40 +1,34 @@
-// ADD to frontend/src/App.tsx
-// 1. Import Footer at the top:
-//    import Footer from './components/Footer'
+// ADD TO frontend/src/App.tsx
+// 1. Add this import at the top:
+//    const Downloads = lazy(() => import('./pages/Downloads'))
 //
-// 2. Import PersonPage:
-//    import PersonPage from './pages/PersonPage'
+// 2. Add this route inside <Routes> (before the * catch-all):
+//    <Route path="/downloads" element={<Downloads />} />
 //
-// 3. Add PersonPage route inside <Routes>:
-//    <Route path="/person/:id" element={<PersonPage />} />
+// 3. Add to Navbar links (optional):
+//    { to: '/downloads', label: 'Downloads', icon: '📥' }
 //
-// 4. Wrap your routes in a layout div and add Footer at the bottom:
+// ─────────────────────────────────────────────────────────────────────────────
+// Full routes block for reference:
 //
-// Your App.tsx should look roughly like this:
-//
-// export default function App() {
-//   return (
-//     <Router>
-//       <Navbar />
-//       <main>
-//         <Routes>
-//           <Route path="/"              element={<Home />} />
-//           <Route path="/movie/:id"     element={<MovieDetail />} />
-//           <Route path="/tv/:id"        element={<TVDetail />} />
-//           <Route path="/person/:id"    element={<PersonPage />} />
-//           <Route path="/player/:type/:id" element={<Player />} />
-//           <Route path="/search"        element={<Search />} />
-//           <Route path="/movies"        element={<Movies />} />
-//           <Route path="/anime"         element={<Anime />} />
-//           <Route path="/tv"            element={<TVShows />} />
-//           <Route path="/watchlist"     element={<Watchlist />} />
-//           <Route path="/profile"       element={<Profile />} />
-//           <Route path="/login"         element={<Login />} />
-//           <Route path="/register"      element={<Register />} />
-//           <Route path="/admin"         element={<AdminDashboard />} />
-//         </Routes>
-//       </main>
-//       <Footer />
-//     </Router>
-//   )
-// }
+// <Routes>
+//   <Route path="/"                   element={<Home />} />
+//   <Route path="/kids"               element={<KidsHome />} />
+//   <Route path="/movie/:id"          element={<MovieDetail />} />
+//   <Route path="/tv/:id"             element={<TVDetail />} />
+//   <Route path="/person/:id"         element={<PersonPage />} />
+//   <Route path="/player/:type/:id"   element={<Player />} />
+//   <Route path="/search"             element={<Search />} />
+//   <Route path="/movies"             element={<Movies />} />
+//   <Route path="/anime"              element={<Anime />} />
+//   <Route path="/tv"                 element={<TVShows />} />
+//   <Route path="/downloads"          element={<Downloads />} />    ← ADD
+//   <Route path="/watchlist"  element={user ? <Watchlist /> : <Navigate to="/login" replace />} />
+//   <Route path="/profile"    element={user ? <Profile />   : <Navigate to="/login" replace />} />
+//   <Route path="/admin"      element={user?.isAdmin ? <Dashboard /> : <Navigate to="/" replace />} />
+//   <Route path="/login"      element={!user ? <Login />    : <Navigate to="/" replace />} />
+//   <Route path="/register"   element={!user ? <Register /> : <Navigate to="/" replace />} />
+//   <Route path="*"           element={<Navigate to="/" replace />} />
+// </Routes>
+
+export {}

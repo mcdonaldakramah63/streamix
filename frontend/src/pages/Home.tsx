@@ -1,60 +1,59 @@
-// frontend/src/pages/Home.tsx — FULL REPLACEMENT
+// frontend/src/pages/Home.tsx
 import { useEffect, useState, useRef, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import api from '../services/api'
-import Carousel            from '../components/Carousel'
-import MovieCard           from '../components/MovieCard'
+import Carousel from '../components/Carousel'
+import MovieCard from '../components/MovieCard'
 import ContinueWatchingRow from '../components/ContinueWatchingRow'
-import RecommendationsRow  from '../components/RecommendationsRow'
-import AnimatedPosterCard  from '../components/AnimatedPosterCard'
-import VerticalFeed        from '../components/VerticalFeed'
+import RecommendationsRow from '../components/RecommendationsRow'
+import AnimatedPosterCard from '../components/AnimatedPosterCard'
+import VerticalFeed from '../components/VerticalFeed'
 import { useInfiniteScroll } from '../hooks/useInfiniteScroll'
-import { useAuthStore }      from '../context/authStore'
-import { useProfileStore }   from '../stores/profileStore'
+import { useAuthStore } from '../context/authStore'
+import { useProfileStore } from '../stores/profileStore'
 
-const BD = (p: string | null) =>
-  p ? `https://image.tmdb.org/t/p/w1280${p}` : ''
+const BD = (p: string | null) => (p ? `https://image.tmdb.org/t/p/w1280${p}` : '')
 
 interface Movie {
-  id:            number
-  title?:        string
-  name?:         string
-  overview?:     string
+  id: number
+  title?: string
+  name?: string
+  overview?: string
   backdrop_path: string | null
-  poster_path?:  string | null
-  vote_average:  number
+  poster_path?: string | null
+  vote_average: number
   release_date?: string
 }
 
 export default function Home() {
-  const navigate        = useNavigate()
-  const { user }        = useAuthStore()
+  const navigate = useNavigate()
+  const { user } = useAuthStore()
   const { activeProfile } = useProfileStore()
 
-  const [trending,   setTrending]   = useState<Movie[]>([])
-  const [topRated,   setTopRated]   = useState<Movie[]>([])
-  const [upcoming,   setUpcoming]   = useState<Movie[]>([])
+  const [trending, setTrending] = useState<Movie[]>([])
+  const [topRated, setTopRated] = useState<Movie[]>([])
+  const [upcoming, setUpcoming] = useState<Movie[]>([])
   const [nowPlaying, setNowPlaying] = useState<Movie[]>([])
-  const [popular,    setPopular]    = useState<Movie[]>([])
-  const [heroLoad,   setHeroLoad]   = useState(true)
-  const [gridLoad,   setGridLoad]   = useState(true)
-  const [heroIdx,    setHeroIdx]    = useState(0)
-  const [heroIn,     setHeroIn]     = useState(true)
-  const [popPage,    setPopPage]    = useState(1)
-  const [hasMore,    setHasMore]    = useState(true)
-  const [busy,       setBusy]       = useState(false)
-  const [showFeed,   setShowFeed]   = useState(false)
+  const [popular, setPopular] = useState<Movie[]>([])
+  const [heroLoad, setHeroLoad] = useState(true)
+  const [gridLoad, setGridLoad] = useState(true)
+  const [heroIdx, setHeroIdx] = useState(0)
+  const [heroIn, setHeroIn] = useState(true)
+  const [popPage, setPopPage] = useState(1)
+  const [hasMore, setHasMore] = useState(true)
+  const [busy, setBusy] = useState(false)
+  const [showFeed, setShowFeed] = useState(false)
 
   const timer = useRef<ReturnType<typeof setInterval>>()
 
-  // ── Kids redirect ────────────────────────────────────────────────────────
+  // Kids redirect
   useEffect(() => {
     if (activeProfile?.isKids) {
       navigate('/kids', { replace: true })
     }
   }, [activeProfile?.isKids, navigate])
 
-  // ── Initial data fetch ───────────────────────────────────────────────────
+  // Initial data fetch
   useEffect(() => {
     setHeroLoad(true)
     Promise.all([
@@ -62,55 +61,68 @@ export default function Home() {
       api.get('/movies/top-rated'),
       api.get('/movies/upcoming'),
       api.get('/movies/now-playing'),
-    ]).then(([t, r, u, n]) => {
-      setTrending(  t.data.results || [])
-      setTopRated(  r.data.results || [])
-      setUpcoming(  u.data.results || [])
-      setNowPlaying(n.data.results || [])
-    }).catch(console.error)
+    ])
+      .then(([t, r, u, n]) => {
+        setTrending(t.data.results || [])
+        setTopRated(r.data.results || [])
+        setUpcoming(u.data.results || [])
+        setNowPlaying(n.data.results || [])
+      })
+      .catch(console.error)
       .finally(() => setHeroLoad(false))
   }, [])
 
-  // ── Hero auto-rotate ─────────────────────────────────────────────────────
+  // Hero auto-rotate
   useEffect(() => {
     if (!trending.length) return
     timer.current = setInterval(() => {
       setHeroIn(false)
       setTimeout(() => {
-        setHeroIdx(i => (i + 1) % Math.min(trending.length, 6))
+        setHeroIdx((i) => (i + 1) % Math.min(trending.length, 6))
         setHeroIn(true)
       }, 300)
     }, 6000)
     return () => clearInterval(timer.current)
   }, [trending.length])
 
-  // ── Popular grid with infinite scroll ───────────────────────────────────
+  // Popular grid with infinite scroll
   const fetchPopular = useCallback(async (pg: number) => {
     pg === 1 ? setGridLoad(true) : setBusy(true)
     try {
       const { data } = await api.get('/movies/popular', { params: { page: pg } })
-      const results  = data.results || []
-      pg === 1 ? setPopular(results) : setPopular(prev => [...prev, ...results])
+      const results = data.results || []
+      pg === 1 ? setPopular(results) : setPopular((prev) => [...prev, ...results])
       setPopPage(pg)
       setHasMore(pg < Math.min(data.total_pages || 1, 15))
-    } catch (e) { console.error(e) }
-    finally { setGridLoad(false); setBusy(false) }
+    } catch (e) {
+      console.error(e)
+    } finally {
+      setGridLoad(false)
+      setBusy(false)
+    }
   }, [])
 
-  useEffect(() => { fetchPopular(1) }, [fetchPopular])
+  useEffect(() => {
+    fetchPopular(1)
+  }, [fetchPopular])
 
-  const loadMore  = useCallback(() => { if (!busy && hasMore) fetchPopular(popPage + 1) }, [busy, hasMore, popPage, fetchPopular])
-  const sentinel  = useInfiniteScroll(loadMore, hasMore && !busy && !gridLoad)
+  const loadMore = useCallback(() => {
+    if (!busy && hasMore) fetchPopular(popPage + 1)
+  }, [busy, hasMore, popPage, fetchPopular])
+
+  const sentinel = useInfiniteScroll(loadMore, hasMore && !busy && !gridLoad)
 
   const changeHero = (idx: number) => {
     clearInterval(timer.current)
     setHeroIn(false)
-    setTimeout(() => { setHeroIdx(idx); setHeroIn(true) }, 200)
+    setTimeout(() => {
+      setHeroIdx(idx)
+      setHeroIn(true)
+    }, 200)
   }
 
   const hero = trending[heroIdx]
 
-  // ── Vertical feed overlay ────────────────────────────────────────────────
   if (showFeed) return <VerticalFeed onClose={() => setShowFeed(false)} />
 
   return (
@@ -149,7 +161,7 @@ export default function Home() {
 
             <h1 className="font-black leading-none mb-3 text-white"
               style={{ fontFamily: 'Syne, sans-serif', fontSize: 'clamp(1.6rem,5vw,3.5rem)', textShadow: '0 2px 20px rgba(0,0,0,0.8)' }}>
-              {hero.title}
+              {hero.title || hero.name}
             </h1>
             <p className="text-slate-300 text-sm leading-relaxed mb-5 line-clamp-2 hidden sm:block max-w-lg">
               {hero.overview}
@@ -158,7 +170,8 @@ export default function Home() {
             <div className="flex gap-2.5 flex-wrap">
               <button
                 onClick={() => navigate(`/player/movie/${hero.id}`)}
-                className="btn-primary px-5 sm:px-7 py-2.5 sm:py-3 text-sm sm:text-base flex items-center gap-2">
+                className="btn-primary px-5 sm:px-7 py-2.5 sm:py-3 text-sm sm:text-base flex items-center gap-2"
+              >
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><polygon points="5,3 19,12 5,21"/></svg>
                 Play Now
               </button>
@@ -168,7 +181,8 @@ export default function Home() {
               <button
                 onClick={() => setShowFeed(true)}
                 className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-white text-sm font-medium transition-all active:scale-95"
-                style={{ background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.15)' }}>
+                style={{ background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.15)' }}
+              >
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
                   <path d="M19.59 6.69a4.83 4.83 0 01-3.77-4.25V2h-3.45v13.67a2.89 2.89 0 01-2.88 2.5 2.89 2.89 0 01-2.89-2.89 2.89 2.89 0 012.89-2.89c.28 0 .54.04.79.1V9.01a6.33 6.33 0 00-.79-.05 6.34 6.34 0 00-6.34 6.34 6.34 6.34 0 006.34 6.34 6.34 6.34 0 006.33-6.34V8.69a8.18 8.18 0 004.79 1.54V6.77a4.85 4.85 0 01-1.02-.08z"/>
                 </svg>
@@ -191,22 +205,25 @@ export default function Home() {
       <div className="mt-6 sm:mt-8"><ContinueWatchingRow /></div>
       {user && <RecommendationsRow />}
 
-      {/* ── Animated poster showcase ── */}
+      {/* ── Trending Picks ── */}
       {!heroLoad && trending.length > 0 && (
         <section className="px-3 sm:px-6 mb-6 sm:mb-8">
           <div className="flex items-center justify-between mb-4">
             <h2 className="section-title">✨ Trending Picks</h2>
             <span className="text-xs text-slate-600">Hover for preview</span>
           </div>
-          <div className="flex gap-3 sm:gap-4 overflow-x-auto scrollbar-hide pb-2 -mx-3 px-3 sm:-mx-6 sm:px-6">
-            {trending.slice(0, 10).map(m => (
+          <div
+            className="flex gap-3 sm:gap-4 overflow-x-auto scrollbar-hide pb-2 -mx-3 px-3 sm:-mx-6 sm:px-6"
+            style={{ touchAction: 'pan-y' }}
+          >
+            {trending.slice(0, 10).map((m) => (
               <AnimatedPosterCard key={m.id} movie={m} type="movie" size="md" showTrailer />
             ))}
           </div>
         </section>
       )}
 
-      {/* ── For You strip ── */}
+      {/* ── For You Feed Button ── */}
       <div className="mx-3 sm:mx-6 mb-6">
         <button
           onClick={() => setShowFeed(true)}

@@ -1,0 +1,1 @@
+import{r as t}from"./index-DzoyviXv.js";function i(r,n=!0){const s=t.useRef(null),o=t.useCallback(e=>{e[0].isIntersecting&&n&&r()},[r,n]);return t.useEffect(()=>{const e=s.current;if(!e)return;const c=new IntersectionObserver(o,{root:null,rootMargin:"300px",threshold:0});return c.observe(e),()=>c.disconnect()},[o]),s}export{i as u};

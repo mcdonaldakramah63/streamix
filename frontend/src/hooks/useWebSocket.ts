@@ -7,7 +7,7 @@
 
 import { useEffect, useRef, useCallback } from 'react'
 import { useAuthStore } from '../context/authStore'
-import { useContinueWatchingStore } from '../stores/continueWatchingStore'
+import { useContinueWatching } from '../stores/continueWatchingStore'
 import api from '../services/api'
 
 const WS_BASE = import.meta.env.VITE_BACKEND_URL
@@ -50,7 +50,7 @@ function isTokenExpired(token: string): boolean {
 
 export function useWebSocket() {
   const { user }              = useAuthStore()
-  const { saveTimestamp }     = useContinueWatchingStore()
+  const { saveTimestamp }     = useContinueWatching()
 
   const wsRef     = useRef<WebSocket | null>(null)
   const timerRef  = useRef<ReturnType<typeof setTimeout>>()

@@ -211,3 +211,15 @@
   .no-scrollbar { scrollbar-width: none; }
   .no-scrollbar::-webkit-scrollbar { display: none; }
 }
+
+/* Global fix for horizontal carousels */
+.overflow-x-auto,
+.touch-pan-y {
+  touch-action: pan-y;
+  -ms-touch-action: pan-y; /* older Edge/IE support */
+}
+
+/* If you ever add Swiper later */
+.swiper {
+  touch-action: pan-y;
+}

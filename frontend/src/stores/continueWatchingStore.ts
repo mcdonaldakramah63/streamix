@@ -1,8 +1,11 @@
 // frontend/src/stores/continueWatchingStore.ts — FULL REPLACEMENT
+// FIX: exports BOTH useContinueWatching (original) AND useContinueWatchingStore (new)
+// so every component that imports either name will work without changes
 import { create } from 'zustand'
 import api from '../services/api'
 
-export interface WatchProgress {
+// ── Types ─────────────────────────────────────────────────────────────────────
+export interface CWItem {
   movieId:      number
   title:        string
   poster:       string
@@ -11,134 +14,159 @@ export interface WatchProgress {
   season?:      number
   episode?:     number
   episodeName?: string
-  progress:     number    // 0–100
-  timestamp:    number    // exact second
-  duration?:    number    // total seconds
+  progress:     number   // 0-100
+  timestamp:    number   // seconds
+  duration?:    number   // seconds
   durationMins?:number
-  watchedAt:    number    // ms
+  watchedAt:    number   // Date.now()
 }
 
-interface Store {
-  items:          WatchProgress[]
-  synced:         boolean
-  fetch:          () => Promise<void>
-  save:           (item: Omit<WatchProgress, 'watchedAt'>) => Promise<void>
-  saveTimestamp:  (movieId: number, timestamp: number, duration?: number) => Promise<void>
-  remove:         (movieId: number) => Promise<void>
-  clear:          () => void
-  get:            (movieId: number) => WatchProgress | undefined
+interface CWState {
+  items:  CWItem[]
+  synced: boolean
+  fetch:         () => Promise<void>
+  save:          (item: Omit<CWItem, 'watchedAt'>) => Promise<void>
+  saveTimestamp: (movieId: number, timestamp: number, duration?: number) => Promise<void>
+  remove:        (movieId: number) => Promise<void>
+  clear:         () => void
+  get:           (movieId: number) => CWItem | undefined
 }
 
+// ── LocalStorage helpers ──────────────────────────────────────────────────────
 const LS_KEY = 'streamix_cw_v3'
 
-function loadLocal(): WatchProgress[] {
+function loadLocal(): CWItem[] {
   try { return JSON.parse(localStorage.getItem(LS_KEY) || '[]') } catch { return [] }
 }
-function writeLocal(items: WatchProgress[]) {
-  try { localStorage.setItem(LS_KEY, JSON.stringify(items)) } catch {}
+
+function saveLocal(items: CWItem[]) {
+  try { localStorage.setItem(LS_KEY, JSON.stringify(items)) } catch { /* quota exceeded */ }
 }
+
 function getToken(): string | null {
-  try { return JSON.parse(localStorage.getItem('streamix_user') || '{}')?.token || null } catch { return null }
+  try {
+    const u = JSON.parse(localStorage.getItem('streamix_user') || '{}')
+    return u?.token || null
+  } catch { return null }
 }
-function mapItem(d: any): WatchProgress {
+
+function normalise(raw: any): CWItem {
   return {
-    movieId:     Number(d.movieId),
-    title:       d.title        || '',
-    poster:      d.poster       || '',
-    backdrop:    d.backdrop     || '',
-    type:        d.type         || 'movie',
-    season:      d.season       != null ? Number(d.season)       : undefined,
-    episode:     d.episode      != null ? Number(d.episode)      : undefined,
-    episodeName: d.episodeName  || undefined,
-    progress:    Number(d.progress)  || 0,
-    timestamp:   Number(d.timestamp) || 0,
-    duration:    d.duration     != null ? Number(d.duration)     : undefined,
-    durationMins:d.durationMins != null ? Number(d.durationMins) : undefined,
-    watchedAt:   d.watchedAt ? new Date(d.watchedAt).getTime() : Date.now(),
+    movieId:     Number(raw.movieId),
+    title:       raw.title        || '',
+    poster:      raw.poster       || '',
+    backdrop:    raw.backdrop     || '',
+    type:        raw.type         || 'movie',
+    season:      raw.season  != null ? Number(raw.season)  : undefined,
+    episode:     raw.episode != null ? Number(raw.episode) : undefined,
+    episodeName: raw.episodeName  || undefined,
+    progress:    Number(raw.progress)  || 0,
+    timestamp:   Number(raw.timestamp) || 0,
+    duration:    raw.duration    != null ? Number(raw.duration)    : undefined,
+    durationMins:raw.durationMins!= null ? Number(raw.durationMins): undefined,
+    watchedAt:   raw.watchedAt ? new Date(raw.watchedAt).getTime() : Date.now(),
   }
 }
 
-export const useContinueWatching = create<Store>((set, get) => ({
+// ── Store ─────────────────────────────────────────────────────────────────────
+const store = create<CWState>((set, get) => ({
   items:  loadLocal(),
   synced: false,
 
+  // ── Fetch from backend (called once on login) ──────────────────────────────
   fetch: async () => {
-    if (!getToken()) { set({ items: loadLocal(), synced: true }); return }
+    if (!getToken()) {
+      set({ items: loadLocal(), synced: true })
+      return
+    }
     try {
       const { data } = await api.get('/users/continue-watching')
       if (!Array.isArray(data)) { set({ items: loadLocal(), synced: true }); return }
-      const items = data.map(mapItem)
-      writeLocal(items)
+      const items = data.map(normalise)
+      saveLocal(items)
       set({ items, synced: true })
     } catch {
       set({ items: loadLocal(), synced: true })
     }
   },
 
+  // ── Save / update an entry ─────────────────────────────────────────────────
   save: async (item) => {
-    const entry: WatchProgress = { ...item, watchedAt: Date.now() }
-    set(state => {
-      const filtered = state.items.filter(i => i.movieId !== item.movieId)
-      const updated  = [entry, ...filtered].slice(0, 20)
-      writeLocal(updated)
-      return { items: updated }
+    const entry: CWItem = { ...item, watchedAt: Date.now() }
+
+    // Optimistic update
+    set(s => {
+      const rest = s.items.filter(i => i.movieId !== item.movieId)
+      const next = [entry, ...rest].slice(0, 20)
+      saveLocal(next)
+      return { items: next }
     })
+
     if (!getToken()) return
     try {
       await api.post('/users/continue-watching', {
-        movieId:     item.movieId,
-        title:       item.title,
-        poster:      item.poster       || '',
-        backdrop:    item.backdrop     || '',
-        type:        item.type,
-        season:      item.season       ?? null,
-        episode:     item.episode      ?? null,
-        episodeName: item.episodeName  ?? '',
-        progress:    item.progress,
-        timestamp:   item.timestamp    ?? 0,
-        duration:    item.duration     ?? null,
-        durationMins:item.durationMins ?? null,
+        movieId:     entry.movieId,
+        title:       entry.title,
+        poster:      entry.poster       || '',
+        backdrop:    entry.backdrop     || '',
+        type:        entry.type,
+        season:      entry.season       ?? null,
+        episode:     entry.episode      ?? null,
+        episodeName: entry.episodeName  ?? '',
+        progress:    entry.progress,
+        timestamp:   entry.timestamp    ?? 0,
+        duration:    entry.duration     ?? null,
+        durationMins:entry.durationMins ?? null,
       })
-    } catch (err: any) {
-      console.warn('[CW] save failed:', err?.response?.status)
+    } catch (e: any) {
+      console.warn('[CW] save failed:', e?.response?.status)
     }
   },
 
-  // ── Save exact timestamp (called every 10s by HLS player) ───────────────────
+  // ── Save just the timestamp (called every ~10s) ────────────────────────────
   saveTimestamp: async (movieId, timestamp, duration) => {
-    // Update local first
-    set(state => {
-      const updated = state.items.map(item => {
-        if (item.movieId !== movieId) return item
+    set(s => {
+      const items = s.items.map(i => {
+        if (i.movieId !== movieId) return i
         const progress = duration && duration > 0
-          ? Math.min(Math.round((timestamp / duration) * 100), 99)
-          : item.progress
-        const entry = { ...item, timestamp, duration: duration ?? item.duration, progress, watchedAt: Date.now() }
-        return entry
+          ? Math.min(Math.round(timestamp / duration * 100), 99)
+          : i.progress
+        return { ...i, timestamp, duration: duration ?? i.duration, progress, watchedAt: Date.now() }
       })
-      writeLocal(updated)
-      return { items: updated }
+      saveLocal(items)
+      return { items }
     })
 
-    // Sync to backend
     if (!getToken()) return
     try {
       await api.post('/stream/timestamp', { movieId, timestamp, duration })
-    } catch (err: any) {
-      console.warn('[CW] timestamp sync failed:', err?.response?.status)
+    } catch (e: any) {
+      console.warn('[CW] timestamp sync failed:', e?.response?.status)
     }
   },
 
+  // ── Remove ─────────────────────────────────────────────────────────────────
   remove: async (movieId) => {
-    set(state => {
-      const updated = state.items.filter(i => i.movieId !== movieId)
-      writeLocal(updated)
-      return { items: updated }
+    set(s => {
+      const items = s.items.filter(i => i.movieId !== movieId)
+      saveLocal(items)
+      return { items }
     })
     if (!getToken()) return
-    try { await api.delete(`/users/continue-watching/${movieId}`) } catch {}
+    try { await api.delete(`/users/continue-watching/${movieId}`) } catch { /* silent */ }
   },
 
-  clear: () => { writeLocal([]); set({ items: [], synced: false }) },
-  get:   (movieId) => get().items.find(i => i.movieId === movieId),
+  // ── Clear all ─────────────────────────────────────────────────────────────
+  clear: () => {
+    saveLocal([])
+    set({ items: [], synced: false })
+  },
+
+  // ── Get one ────────────────────────────────────────────────────────────────
+  get: (movieId) => get().items.find(i => i.movieId === movieId),
 }))
+
+// ── Exports — BOTH names so no import needs changing ─────────────────────────
+export const useContinueWatching       = store   // original name (used by ContinueWatchingRow, Player v1)
+export const useContinueWatchingStore  = store   // new name (used by HLSPlayer, Player v2)
+export default store
