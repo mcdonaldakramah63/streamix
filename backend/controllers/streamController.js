@@ -198,3 +198,13 @@ exports.proxy = async (req, res) => {
     res.status(status).send(`Proxy error: ${e.message}`)
   }
 }
+
+// ── Export all functions (add this at the VERY END of streamController.js) ──
+module.exports = {
+  animeSearch,
+  animeInfo,
+  animeEpisodes,
+  animeWatch,
+  proxy,           // the proxy function
+  saveTimestamp,
+};

@@ -1,26 +1,28 @@
-// backend/routes/stream.js — FULL REPLACEMENT
-const express = require('express')
-const router  = express.Router()
-const { protect } = require('../middleware/auth')
+// backend/routes/stream.js — FIXED & READY FOR NETFLIX VIBES
+const express = require('express');
+const router = express.Router();
+const { protect } = require('../middleware/auth');
+
+// Import with correct names from controller
 const {
-  searchAnime,
-  getAnimeInfo,
-  getAnimeEpisodes,
-  watchAnime,
-  proxyStream,
+  animeSearch,
+  animeInfo,
+  animeEpisodes,
+  animeWatch,
+  proxy: proxyStream,      // alias so we keep proxyStream in code if you like
   saveTimestamp,
-} = require('../controllers/streamController')
+} = require('../controllers/streamController');
 
-// Anime
-router.get('/anime/search',   searchAnime)
-router.get('/anime/info',     getAnimeInfo)
-router.get('/anime/episodes', getAnimeEpisodes)
-router.get('/anime/watch',    watchAnime)
+// Anime routes (public for now)
+router.get('/anime/search', animeSearch);
+router.get('/anime/info/:id', animeInfo);           // changed to :id for cleaner URL
+router.get('/anime/episodes', animeEpisodes);
+router.get('/anime/watch', animeWatch);             // returns sources + HLS links
 
-// M3U8 proxy — no auth required (browser fetches directly)
-router.get('/proxy', proxyStream)
+// HLS Proxy — no auth (browser needs direct access)
+router.get('/proxy', proxyStream);
 
-// Timestamp — auth required
-router.post('/timestamp', protect, saveTimestamp)
+// Save watch progress (protected)
+router.post('/timestamp', protect, saveTimestamp);
 
-module.exports = router
+module.exports = router;
