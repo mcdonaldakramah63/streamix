@@ -199,12 +199,4 @@ exports.proxy = async (req, res) => {
   }
 }
 
-// ── Export all functions (add this at the VERY END of streamController.js) ──
-module.exports = {
-  animeSearch,
-  animeInfo,
-  animeEpisodes,
-  animeWatch,
-  proxy,           // the proxy function
-  saveTimestamp,
-};
+
