@@ -1,18 +1,38 @@
-const express = require('express')
-const { protect, adminOnly } = require('../middleware/auth')
+// backend/routes/admin.js — FIXED & CLEAN FOR STREAMIX (free Railway tier)
+const express = require('express');
+const router = express.Router();
+
+const { protect, adminOnly } = require('../middleware/auth');   // keep your middleware name
+
+// Import controller with EXACT matching names
 const {
-  getUsers, deleteUser, toggleAdmin, getStats,
-  getAuditLogs, unblockUserIP
-} = require('../controllers/adminController')
+  getUsers,
+  deleteUser,
+  toggleAdmin,
+  getStats,
+  getAuditLogs,
+  unblockUserIP,
+} = require('../controllers/adminController');
 
-const r = express.Router()
-r.use(protect, adminOnly)
+// DEBUG log so you see what's loaded on Railway
+console.log('✅ ADMIN ROUTES LOADED - Functions available:', {
+  getUsers: typeof getUsers,
+  deleteUser: typeof deleteUser,
+  toggleAdmin: typeof toggleAdmin,
+  getStats: typeof getStats,
+  getAuditLogs: typeof getAuditLogs,
+  unblockUserIP: typeof unblockUserIP,
+});
 
-r.get('/stats',          getStats)
-r.get('/users',          getUsers)
-r.delete('/user/:id',    deleteUser)
-r.put('/user/:id/admin', toggleAdmin)
-r.get('/audit-logs',     getAuditLogs)
-r.post('/unblock-ip',    unblockUserIP)
+// Apply middleware to ALL admin routes
+router.use(protect, adminOnly);
 
-module.exports = r
+// Admin routes
+router.get('/stats', getStats);
+router.get('/users', getUsers);
+router.delete('/user/:id', deleteUser);        // matches your original
+router.put('/user/:id/admin', toggleAdmin);    // matches your original
+router.get('/audit-logs', getAuditLogs);
+router.post('/unblock-ip', unblockUserIP);
+
+module.exports = router;
