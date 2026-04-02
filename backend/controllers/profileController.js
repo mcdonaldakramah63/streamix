@@ -1,8 +1,7 @@
-// backend/controllers/profileController.js — FULL UPDATED WITH REAL KID-SAFE CONTENT
+// backend/controllers/profileController.js — FIXED + KID-SAFE CONTENT
 const Profile = require('../models/Profile');
 const axios = require('axios');
 
-// TMDB API helper
 const TMDB_API = 'https://api.themoviedb.org/3';
 const TMDB_KEY = process.env.TMDB_API_KEY;
 
@@ -19,7 +18,6 @@ const getProfiles = async (req, res) => {
   }
 };
 
-// Create profile
 const createProfile = async (req, res) => {
   try {
     const count = await Profile.countDocuments({ user: req.user._id });
@@ -43,7 +41,6 @@ const createProfile = async (req, res) => {
   }
 };
 
-// Update profile
 const updateProfile = async (req, res) => {
   try {
     const profile = await Profile.findOne({ _id: req.params.id, user: req.user._id });
@@ -68,7 +65,6 @@ const updateProfile = async (req, res) => {
   }
 };
 
-// Delete profile
 const deleteProfile = async (req, res) => {
   try {
     const result = await Profile.findOneAndDelete({ _id: req.params.id, user: req.user._id });
@@ -79,7 +75,6 @@ const deleteProfile = async (req, res) => {
   }
 };
 
-// Record watch
 const recordWatch = async (req, res) => {
   try {
     const profile = await Profile.findOne({ _id: req.params.id, user: req.user._id });
@@ -108,7 +103,7 @@ const recordWatch = async (req, res) => {
   }
 };
 
-// KID-SAFE CONTENT - Real TMDB filtered data
+// FIXED KID-SAFE CONTENT
 const getKidSafeContent = async (req, res) => {
   try {
     const profile = await Profile.findById(req.params.id);
@@ -116,18 +111,29 @@ const getKidSafeContent = async (req, res) => {
       return res.status(403).json({ message: 'Access only for kids profiles' });
     }
 
-    // Fetch kid-safe content from TMDB (G/PG rated + family friendly)
+    // Real TMDB kid-safe fetch
     const [popularRes, animationRes] = await Promise.all([
       axios.get(`${TMDB_API}/discover/movie`, {
-        params: { api_key: TMDB_KEY, certification_country: 'US', certification: 'G|PG', sort_by: 'popularity.desc', page: 1 },
+        params: {
+          api_key: TMDB_KEY,
+          certification_country: 'US',
+          certification: 'G|PG',
+          sort_by: 'popularity.desc',
+          page: 1
+        }
       }),
       axios.get(`${TMDB_API}/discover/movie`, {
-        params: { api_key: TMDB_KEY, with_genres: '16', sort_by: 'popularity.desc', page: 1 }, // Animation
-      }),
+        params: {
+          api_key: TMDB_KEY,
+          with_genres: '16', // Animation
+          sort_by: 'popularity.desc',
+          page: 1
+        }
+      })
     ]);
 
-    const popularKids = popularRes.data.results.slice(0, 15);
-    const animation = animationRes.data.results.slice(0, 15);
+    const popularKids = popularRes.data.results?.slice(0, 12) || [];
+    const animation = animationRes.data.results?.slice(0, 12) || [];
 
     res.json({
       success: true,
@@ -135,16 +141,18 @@ const getKidSafeContent = async (req, res) => {
       rows: [
         { title: "Popular for Kids", items: popularKids },
         { title: "Cartoons & Animation", items: animation },
-        { title: "Fun Family Movies", items: popularKids.slice(5) },
+        { title: "Fun Family Movies", items: popularKids.slice(4) }
       ]
     });
   } catch (e) {
-    console.error('Kid content error:', e.message);
-    res.status(500).json({ message: 'Failed to load kids content' });
+    console.error('[KidSafe] Error:', e.message);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Failed to load kids content. Please try again.' 
+    });
   }
 };
 
-// Get recommendations
 const getRecommendations = async (req, res) => {
   try {
     const profile = await Profile.findById(req.params.id).lean();
@@ -173,7 +181,6 @@ const getRecommendations = async (req, res) => {
   }
 };
 
-// Verify PIN
 const verifyPin = async (req, res) => {
   try {
     const profile = await Profile.findOne({ _id: req.params.id, user: req.user._id });
