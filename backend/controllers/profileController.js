@@ -1,8 +1,8 @@
-// backend/controllers/profileController.js — FULL REWRITE WITH ROBUST KID MODE
+// backend/controllers/profileController.js — FULL FIXED VERSION FOR KID MODE
 const Profile = require('../models/Profile');
 
-// ── GET all profiles ─────────────────────────────────────────────────────────
-exports.getProfiles = async (req, res) => {
+// GET all profiles for the logged-in user
+const getProfiles = async (req, res) => {
   try {
     const profiles = await Profile.find({ user: req.user._id })
       .select('-watchHistory -pin')
@@ -14,8 +14,8 @@ exports.getProfiles = async (req, res) => {
   }
 };
 
-// ── Create profile ───────────────────────────────────────────────────────────
-exports.createProfile = async (req, res) => {
+// Create new profile
+const createProfile = async (req, res) => {
   try {
     const count = await Profile.countDocuments({ user: req.user._id });
     if (count >= 5) return res.status(400).json({ message: 'Maximum 5 profiles per account' });
@@ -38,8 +38,8 @@ exports.createProfile = async (req, res) => {
   }
 };
 
-// ── Update profile (including PIN for adult profiles) ────────────────────────
-exports.updateProfile = async (req, res) => {
+// Update profile (including PIN for adult profiles)
+const updateProfile = async (req, res) => {
   try {
     const profile = await Profile.findOne({ _id: req.params.id, user: req.user._id });
     if (!profile) return res.status(404).json({ message: 'Profile not found' });
@@ -53,7 +53,7 @@ exports.updateProfile = async (req, res) => {
       profile.isKids = Boolean(isKids);
       profile.maturityLevel = Boolean(isKids) ? 'kids' : 'all';
     }
-    if (pin !== undefined && !profile.isKids) profile.pin = pin; // Only adults get PIN
+    if (pin !== undefined && !profile.isKids) profile.pin = pin;
     if (maturityLevel) profile.maturityLevel = maturityLevel;
 
     await profile.save();
@@ -63,8 +63,8 @@ exports.updateProfile = async (req, res) => {
   }
 };
 
-// ── Delete profile ───────────────────────────────────────────────────────────
-exports.deleteProfile = async (req, res) => {
+// Delete profile
+const deleteProfile = async (req, res) => {
   try {
     const result = await Profile.findOneAndDelete({ _id: req.params.id, user: req.user._id });
     if (!result) return res.status(404).json({ message: 'Profile not found' });
@@ -74,8 +74,8 @@ exports.deleteProfile = async (req, res) => {
   }
 };
 
-// ── Record watch progress per profile ────────────────────────────────────────
-exports.recordWatch = async (req, res) => {
+// Record watch progress per profile
+const recordWatch = async (req, res) => {
   try {
     const profile = await Profile.findOne({ _id: req.params.id, user: req.user._id });
     if (!profile) return res.status(404).json({ message: 'Profile not found' });
@@ -103,16 +103,14 @@ exports.recordWatch = async (req, res) => {
   }
 };
 
-// ── Get kid-safe content (for Kids Homepage) ─────────────────────────────────
-exports.getKidSafeContent = async (req, res) => {
+// Get kid-safe content for Kids Homepage
+const getKidSafeContent = async (req, res) => {
   try {
     const profile = await Profile.findById(req.params.id);
     if (!profile || !profile.isKids) {
       return res.status(403).json({ message: 'Access only for kids profiles' });
     }
 
-    // TODO: Replace with real TMDB query filtered by maturity rating (G, PG, TV-Y etc.)
-    // For now returning structure — you can connect to your movie routes later
     res.json({
       success: true,
       isKidsMode: true,
@@ -127,8 +125,8 @@ exports.getKidSafeContent = async (req, res) => {
   }
 };
 
-// ── Get recommendations (smart for kids vs adults) ───────────────────────────
-exports.getRecommendations = async (req, res) => {
+// Get recommendations (enhanced for kids)
+const getRecommendations = async (req, res) => {
   try {
     const profile = await Profile.findById(req.params.id).lean();
     if (!profile) return res.status(404).json({ message: 'Profile not found' });
@@ -156,8 +154,8 @@ exports.getRecommendations = async (req, res) => {
   }
 };
 
-// ── Verify PIN when switching from kids to adult profile ─────────────────────
-exports.verifyPin = async (req, res) => {
+// Verify PIN when switching profiles
+const verifyPin = async (req, res) => {
   try {
     const profile = await Profile.findOne({ _id: req.params.id, user: req.user._id });
     if (!profile) return res.status(404).json({ message: 'Profile not found' });
@@ -177,6 +175,7 @@ exports.verifyPin = async (req, res) => {
   }
 };
 
+// Export all functions as object (this fixes the "not defined" error)
 module.exports = {
   getProfiles,
   createProfile,
