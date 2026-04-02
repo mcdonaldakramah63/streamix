@@ -1,150 +1,123 @@
-// frontend/src/components/ProfileSelector.tsx — NEW FILE
-import { useState, useEffect } from 'react'
-import { useProfileStore, Profile } from '../stores/profileStore'
-import { useAuthStore } from '../context/authStore'
+// frontend/src/components/ProfileSelector.tsx
+import React, { useState } from 'react';
+import { useProfileStore } from '../stores/profileStore';
 
-const AVATAR_OPTIONS = ['🎬','📺','🎌','🎭','🚀','👻','💕','⚔️','🧙','🔍','🎵','🌍','👨‍👩‍👧','🎨','😂']
-const COLOR_OPTIONS  = ['#14b8a6','#8b5cf6','#f59e0b','#ef4444','#3b82f6','#10b981','#f97316','#ec4899']
-
-interface Props {
-  onSelect: (profile: Profile) => void
+interface Profile {
+  _id: string;
+  name: string;
+  avatar: string;
+  color: string;
+  isKids: boolean;
+  pin?: string;
 }
 
-export default function ProfileSelector({ onSelect }: Props) {
-  const { user }    = useAuthStore()
-  const { profiles, fetch, create, loading } = useProfileStore()
+const ProfileSelector: React.FC = () => {
+  const { profiles, activeProfile, switchProfile } = useProfileStore();
+  const [showPinModal, setShowPinModal] = useState(false);
+  const [selectedProfile, setSelectedProfile] = useState<Profile | null>(null);
+  const [pinInput, setPinInput] = useState('');
 
-  const [showCreate, setShowCreate] = useState(false)
-  const [form, setForm] = useState({ name: '', avatar: '🎬', color: '#14b8a6', isKids: false })
-  const [saving, setSaving] = useState(false)
+  const handleProfileClick = (profile: Profile) => {
+    if (profile.isKids || !profile.pin) {
+      switchProfile(profile);
+      return;
+    }
 
-  useEffect(() => { if (user) fetch() }, [user])
+    // Adult profile with PIN protection
+    setSelectedProfile(profile);
+    setShowPinModal(true);
+    setPinInput('');
+  };
 
-  const handleCreate = async () => {
-    if (!form.name.trim()) return
-    setSaving(true)
+  const verifyPin = async () => {
+    if (!selectedProfile) return;
+
     try {
-      const p = await create(form)
-      onSelect(p)
-    } finally { setSaving(false) }
-  }
+      const res = await fetch(`/api/profiles/${selectedProfile._id}/verify-pin`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${localStorage.getItem('token') || ''}`,
+        },
+        body: JSON.stringify({ pin: pinInput }),
+      });
 
-  if (loading && !profiles.length) {
-    return (
-      <div className="fixed inset-0 z-[200] flex items-center justify-center bg-dark">
-        <div className="w-10 h-10 border-2 border-dark-border border-t-brand rounded-full animate-spin" />
-      </div>
-    )
-  }
+      if (res.ok) {
+        switchProfile(selectedProfile);
+        setShowPinModal(false);
+      } else {
+        alert('Incorrect PIN! Please try again.');
+        setPinInput('');
+      }
+    } catch (error) {
+      console.error('PIN verification failed:', error);
+      alert('Something went wrong. Please try again.');
+    }
+  };
 
   return (
-    <div className="fixed inset-0 z-[200] flex flex-col items-center justify-center bg-dark"
-      style={{ background: 'radial-gradient(ellipse at center, rgba(20,184,166,0.05) 0%, #07080c 70%)' }}>
-
-      <h1 className="text-3xl sm:text-4xl font-bold text-white mb-2" style={{ fontFamily:'Syne, sans-serif' }}>
-        Who's Watching?
-      </h1>
-      <p className="text-slate-500 text-sm mb-10">Select a profile to personalize your experience</p>
-
-      {/* Profile grid */}
-      <div className="flex flex-wrap gap-5 justify-center mb-8 max-w-xl px-4">
-        {profiles.map(p => (
-          <button key={p._id} onClick={() => onSelect(p)}
-            className="flex flex-col items-center gap-2.5 group">
+    <>
+      <div className="flex gap-6 overflow-x-auto pb-6 px-4">
+        {profiles.map((profile: Profile) => (
+          <div
+            key={profile._id}
+            onClick={() => handleProfileClick(profile)}
+            className={`cursor-pointer flex-shrink-0 text-center transition-all duration-200 hover:scale-110 ${
+              activeProfile?._id === profile._id ? 'scale-110 ring-4 ring-white' : ''
+            }`}
+          >
             <div
-              className="w-20 h-20 sm:w-24 sm:h-24 rounded-2xl flex items-center justify-center text-4xl sm:text-5xl
-                border-2 border-transparent group-hover:border-white transition-all duration-200 group-hover:scale-105"
-              style={{ background: p.color + '25', borderColor: 'transparent' }}>
-              {p.avatar || '🎬'}
-              {p.isKids && (
-                <div className="absolute -top-1 -right-1 bg-yellow-400 text-dark text-[9px] font-bold px-1.5 py-0.5 rounded-full">
-                  KIDS
-                </div>
-              )}
+              className="w-24 h-24 rounded-3xl flex items-center justify-center text-5xl shadow-2xl mb-3"
+              style={{ backgroundColor: profile.color || '#14b8a6' }}
+            >
+              {profile.avatar || '🎬'}
             </div>
-            <span className="text-slate-300 text-sm group-hover:text-white transition-colors font-medium">
-              {p.name}
-            </span>
-          </button>
+            <p className="font-semibold text-lg text-white">{profile.name}</p>
+            {profile.isKids && (
+              <p className="text-xs text-green-400 font-medium mt-1">👦 Kids Mode</p>
+            )}
+          </div>
         ))}
-
-        {/* Add profile button */}
-        {profiles.length < 5 && (
-          <button onClick={() => setShowCreate(true)}
-            className="flex flex-col items-center gap-2.5 group">
-            <div className="w-20 h-20 sm:w-24 sm:h-24 rounded-2xl flex items-center justify-center
-              border-2 border-dashed border-dark-border group-hover:border-brand transition-all duration-200 group-hover:scale-105 bg-dark-card">
-              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
-                className="text-slate-600 group-hover:text-brand transition-colors">
-                <path d="M12 5v14M5 12h14"/>
-              </svg>
-            </div>
-            <span className="text-slate-600 text-sm group-hover:text-slate-300 transition-colors">Add Profile</span>
-          </button>
-        )}
       </div>
 
-      {/* Create profile modal */}
-      {showCreate && (
-        <div className="fixed inset-0 z-[210] flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm">
-          <div className="glass rounded-3xl p-6 w-full max-w-sm shadow-deep animate-scale-in">
-            <h2 className="text-lg font-bold text-white mb-5" style={{ fontFamily:'Syne, sans-serif' }}>
-              New Profile
-            </h2>
+      {/* PIN Modal */}
+      {showPinModal && selectedProfile && (
+        <div className="fixed inset-0 bg-black/90 flex items-center justify-center z-50">
+          <div className="bg-zinc-900 text-white p-8 rounded-3xl w-full max-w-sm mx-4">
+            <h3 className="text-2xl font-bold text-center mb-6">
+              Enter PIN to unlock
+            </h3>
+            <p className="text-center text-gray-400 mb-6">{selectedProfile.name}</p>
 
-            {/* Name */}
             <input
-              value={form.name}
-              onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
-              placeholder="Profile name"
-              className="input mb-4"
-              maxLength={30}
+              type="password"
+              maxLength={4}
+              value={pinInput}
+              onChange={(e) => setPinInput(e.target.value)}
+              className="w-full text-center text-5xl tracking-[8px] bg-zinc-800 border border-zinc-700 rounded-2xl py-6 focus:outline-none focus:border-white mb-8"
               autoFocus
+              placeholder="••••"
             />
 
-            {/* Avatar picker */}
-            <p className="text-xs font-bold uppercase tracking-widest text-slate-500 mb-2">Avatar</p>
-            <div className="flex flex-wrap gap-2 mb-4">
-              {AVATAR_OPTIONS.map(a => (
-                <button key={a} onClick={() => setForm(f => ({ ...f, avatar: a }))}
-                  className={`w-10 h-10 rounded-xl text-2xl flex items-center justify-center transition-all ${
-                    form.avatar === a ? 'bg-brand/20 ring-2 ring-brand scale-110' : 'bg-dark-card hover:bg-dark-hover'
-                  }`}>
-                  {a}
-                </button>
-              ))}
-            </div>
-
-            {/* Color picker */}
-            <p className="text-xs font-bold uppercase tracking-widest text-slate-500 mb-2">Color</p>
-            <div className="flex gap-2 mb-4">
-              {COLOR_OPTIONS.map(c => (
-                <button key={c} onClick={() => setForm(f => ({ ...f, color: c }))}
-                  className={`w-8 h-8 rounded-full transition-all ${form.color === c ? 'ring-2 ring-white scale-110' : ''}`}
-                  style={{ background: c }} />
-              ))}
-            </div>
-
-            {/* Kids toggle */}
-            <label className="flex items-center gap-3 mb-5 cursor-pointer">
-              <div
-                onClick={() => setForm(f => ({ ...f, isKids: !f.isKids }))}
-                className={`w-11 h-6 rounded-full relative transition-colors ${form.isKids ? 'bg-brand' : 'bg-dark-border'}`}>
-                <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-transform ${form.isKids ? 'translate-x-6' : 'translate-x-1'}`} />
-              </div>
-              <span className="text-sm text-slate-300">Kids Mode <span className="text-slate-600 text-xs">(filters adult content)</span></span>
-            </label>
-
-            <div className="flex gap-2">
-              <button onClick={() => setShowCreate(false)} className="btn-secondary flex-1 py-2.5">Cancel</button>
-              <button onClick={handleCreate} disabled={saving || !form.name.trim()}
-                className="btn-primary flex-1 py-2.5 disabled:opacity-60">
-                {saving ? <div className="w-4 h-4 border-2 border-dark/30 border-t-dark rounded-full animate-spin mx-auto" /> : 'Create'}
+            <div className="flex gap-4">
+              <button
+                onClick={() => setShowPinModal(false)}
+                className="flex-1 py-4 bg-zinc-800 hover:bg-zinc-700 rounded-2xl font-semibold transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={verifyPin}
+                className="flex-1 py-4 bg-white text-black hover:bg-gray-200 rounded-2xl font-semibold transition-colors"
+              >
+                Unlock
               </button>
             </div>
           </div>
         </div>
       )}
-    </div>
-  )
-}
+    </>
+  );
+};
+
+export default ProfileSelector;

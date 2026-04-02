@@ -8,10 +8,11 @@ import Navbar              from './components/Navbar'
 import Footer              from './components/Footer'
 import ProfileSelector     from './components/ProfileSelector'
 import { useWebSocket }    from './hooks/useWebSocket'
+import Kids from './pages/Kids'
 
 // ── Lazy pages ──────────────────────────────────────────────────────────────
 const Home       = lazy(() => import('./pages/Home'))
-const KidsHome   = lazy(() => import('./pages/KidsHome'))   // <-- CRITICAL: kids route
+const KidsHome   = lazy(() => import('./pages/Kids'))   // <-- CRITICAL: kids route
 const MovieDetail = lazy(() => import('./pages/MovieDetail'))
 const TVDetail   = lazy(() => import('./pages/TVDetail'))
 const PersonPage = lazy(() => import('./pages/PersonPage'))
@@ -93,6 +94,7 @@ export default function App() {
           <Routes>
             {/* Home — redirects to /kids if active profile is kids */}
             <Route path="/"                   element={<Home />} />
+            <Route path="/kids" element={<Kids />} />
 
             {/* Kids mode — standalone page with its own layout */}
             <Route path="/kids"               element={<KidsHome />} />

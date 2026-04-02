@@ -11,6 +11,7 @@ import VerticalFeed from '../components/VerticalFeed'
 import { useInfiniteScroll } from '../hooks/useInfiniteScroll'
 import { useAuthStore } from '../context/authStore'
 import { useProfileStore } from '../stores/profileStore'
+import Kids from './Kids';
 
 const BD = (p: string | null) => (p ? `https://image.tmdb.org/t/p/w1280${p}` : '')
 
@@ -24,6 +25,7 @@ interface Movie {
   vote_average: number
   release_date?: string
 }
+
 
 export default function Home() {
   const navigate = useNavigate()
@@ -45,6 +47,8 @@ export default function Home() {
   const [showFeed, setShowFeed] = useState(false)
 
   const timer = useRef<ReturnType<typeof setInterval>>()
+
+  
 
   // Kids redirect
   useEffect(() => {
