@@ -29,4 +29,5 @@ const profileSchema = new mongoose.Schema({
 
 profileSchema.index({ userId: 1 })
 
-module.exports = mongoose.model('Profile', profileSchema)
+const ModelName = mongoose.models.ModelName || mongoose.model('ModelName', schema);
+module.exports = ModelName;
