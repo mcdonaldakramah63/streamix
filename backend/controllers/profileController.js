@@ -1,31 +1,11 @@
-// backend/controllers/profileController.js — FIXED FOR RAILWAY FREE TIER (Pure JS)
-const mongoose = require('mongoose');
+// backend/controllers/profileController.js — FULL REWRITE WITH ROBUST KID MODE
+const Profile = require('../models/Profile');
 
-// ── Profile model (inline so it works even without separate file) ─────────────
-const profileSchema = new mongoose.Schema({
-  user:        { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
-  name:        { type: String, required: true, trim: true, maxlength: 30 },
-  avatar:      { type: String, default: '🎬' },
-  color:       { type: String, default: '#14b8a6' },
-  isKids:      { type: Boolean, default: false },
-  watchHistory: [{
-    tmdbId:     Number,
-    title:      String,
-    type:       { type: String, enum: ['movie','tv'] },
-    genres:     [Number],
-    language:   String,
-    completed:  Boolean,
-    watchedAt:  { type: Date, default: Date.now },
-  }],
-}, { timestamps: true });
-
-const Profile = mongoose.models.Profile || mongoose.model('Profile', profileSchema);
-
-// ── GET /api/profiles ─────────────────────────────────────────────────────────
+// ── GET all profiles ─────────────────────────────────────────────────────────
 exports.getProfiles = async (req, res) => {
   try {
     const profiles = await Profile.find({ user: req.user._id })
-      .select('-watchHistory')
+      .select('-watchHistory -pin')
       .sort({ createdAt: 1 })
       .lean();
     res.json(profiles);
@@ -34,7 +14,7 @@ exports.getProfiles = async (req, res) => {
   }
 };
 
-// ── POST /api/profiles ────────────────────────────────────────────────────────
+// ── Create profile ───────────────────────────────────────────────────────────
 exports.createProfile = async (req, res) => {
   try {
     const count = await Profile.countDocuments({ user: req.user._id });
@@ -44,29 +24,37 @@ exports.createProfile = async (req, res) => {
     if (!name?.trim()) return res.status(400).json({ message: 'Profile name is required' });
 
     const profile = await Profile.create({
-      user:   req.user._id,
-      name:   name.trim(),
+      user: req.user._id,
+      name: name.trim(),
       avatar,
       color,
       isKids: Boolean(isKids),
+      maturityLevel: Boolean(isKids) ? 'kids' : 'all',
     });
+
     res.status(201).json(profile);
   } catch (e) {
     res.status(500).json({ message: e.message });
   }
 };
 
-// ── PUT /api/profiles/:id ─────────────────────────────────────────────────────
+// ── Update profile (including PIN for adult profiles) ────────────────────────
 exports.updateProfile = async (req, res) => {
   try {
     const profile = await Profile.findOne({ _id: req.params.id, user: req.user._id });
     if (!profile) return res.status(404).json({ message: 'Profile not found' });
 
-    const { name, avatar, color, isKids } = req.body;
+    const { name, avatar, color, isKids, pin, maturityLevel } = req.body;
+
     if (name !== undefined) profile.name = name.trim();
     if (avatar !== undefined) profile.avatar = avatar;
     if (color !== undefined) profile.color = color;
-    if (isKids !== undefined) profile.isKids = Boolean(isKids);
+    if (isKids !== undefined) {
+      profile.isKids = Boolean(isKids);
+      profile.maturityLevel = Boolean(isKids) ? 'kids' : 'all';
+    }
+    if (pin !== undefined && !profile.isKids) profile.pin = pin; // Only adults get PIN
+    if (maturityLevel) profile.maturityLevel = maturityLevel;
 
     await profile.save();
     res.json(profile);
@@ -75,27 +63,25 @@ exports.updateProfile = async (req, res) => {
   }
 };
 
-// ── DELETE /api/profiles/:id ──────────────────────────────────────────────────
+// ── Delete profile ───────────────────────────────────────────────────────────
 exports.deleteProfile = async (req, res) => {
   try {
     const result = await Profile.findOneAndDelete({ _id: req.params.id, user: req.user._id });
     if (!result) return res.status(404).json({ message: 'Profile not found' });
-    res.json({ message: 'Deleted' });
+    res.json({ message: 'Profile deleted' });
   } catch (e) {
     res.status(500).json({ message: e.message });
   }
 };
 
-// ── POST /api/profiles/:id/watch ─────────────────────────────────────────────
+// ── Record watch progress per profile ────────────────────────────────────────
 exports.recordWatch = async (req, res) => {
   try {
     const profile = await Profile.findOne({ _id: req.params.id, user: req.user._id });
     if (!profile) return res.status(404).json({ message: 'Profile not found' });
 
-    const { tmdbId, title, type, genres = [], language = 'en', completed = false } = req.body;
-    if (!tmdbId || !type) return res.status(400).json({ message: 'tmdbId and type required' });
+    const { tmdbId, title, type, genres = [], language = 'en', progress = 0, completed = false } = req.body;
 
-    // Remove old entry for same title, add new one at front
     profile.watchHistory = profile.watchHistory.filter(h => h.tmdbId !== Number(tmdbId));
     profile.watchHistory.unshift({
       tmdbId: Number(tmdbId),
@@ -103,14 +89,12 @@ exports.recordWatch = async (req, res) => {
       type,
       genres,
       language,
+      progress: Math.min(Math.max(Number(progress), 0), 100),
       completed: Boolean(completed),
       watchedAt: new Date()
     });
 
-    // Keep last 200 entries
-    if (profile.watchHistory.length > 200) {
-      profile.watchHistory = profile.watchHistory.slice(0, 200);
-    }
+    if (profile.watchHistory.length > 200) profile.watchHistory = profile.watchHistory.slice(0, 200);
 
     await profile.save();
     res.json({ ok: true });
@@ -119,14 +103,37 @@ exports.recordWatch = async (req, res) => {
   }
 };
 
-// ── GET /api/profiles/:id/recommendations ────────────────────────────────────
+// ── Get kid-safe content (for Kids Homepage) ─────────────────────────────────
+exports.getKidSafeContent = async (req, res) => {
+  try {
+    const profile = await Profile.findById(req.params.id);
+    if (!profile || !profile.isKids) {
+      return res.status(403).json({ message: 'Access only for kids profiles' });
+    }
+
+    // TODO: Replace with real TMDB query filtered by maturity rating (G, PG, TV-Y etc.)
+    // For now returning structure — you can connect to your movie routes later
+    res.json({
+      success: true,
+      isKidsMode: true,
+      rows: [
+        { title: "Popular for Kids", items: [] },
+        { title: "Cartoons & Fun", items: [] },
+        { title: "Learning & Stories", items: [] },
+      ]
+    });
+  } catch (e) {
+    res.status(500).json({ message: e.message });
+  }
+};
+
+// ── Get recommendations (smart for kids vs adults) ───────────────────────────
 exports.getRecommendations = async (req, res) => {
   try {
     const profile = await Profile.findById(req.params.id).lean();
     if (!profile) return res.status(404).json({ message: 'Profile not found' });
 
-    // Score genres by watch frequency (pure JS - no TypeScript)
-    const genreScore = {};   // ← FIXED: removed : Record<number, number>
+    const genreScore = {};
 
     for (const h of profile.watchHistory.slice(0, 50)) {
       for (const g of (h.genres || [])) {
@@ -136,19 +143,47 @@ exports.getRecommendations = async (req, res) => {
 
     const topGenres = Object.entries(genreScore)
       .sort((a, b) => Number(b[1]) - Number(a[1]))
-      .slice(0, 3)
+      .slice(0, 5)
       .map(([id]) => Number(id));
 
-    const watchedIds = profile.watchHistory.slice(0, 100).map(h => h.tmdbId);
-    const lastWatched = profile.watchHistory.slice(0, 3);
-
-    res.json({ 
-      topGenres, 
-      watchedIds, 
-      lastWatched,
-      message: "Recommendations based on your watch history"
+    res.json({
+      topGenres,
+      lastWatched: profile.watchHistory.slice(0, 5),
+      isKidsMode: profile.isKids
     });
   } catch (e) {
     res.status(500).json({ message: e.message });
   }
+};
+
+// ── Verify PIN when switching from kids to adult profile ─────────────────────
+exports.verifyPin = async (req, res) => {
+  try {
+    const profile = await Profile.findOne({ _id: req.params.id, user: req.user._id });
+    if (!profile) return res.status(404).json({ message: 'Profile not found' });
+
+    const { pin } = req.body;
+    if (profile.isKids || !profile.pin) {
+      return res.status(400).json({ message: 'PIN not required for this profile' });
+    }
+
+    if (profile.pin === pin) {
+      res.json({ success: true });
+    } else {
+      res.status(401).json({ message: 'Incorrect PIN' });
+    }
+  } catch (e) {
+    res.status(500).json({ message: e.message });
+  }
+};
+
+module.exports = {
+  getProfiles,
+  createProfile,
+  updateProfile,
+  deleteProfile,
+  recordWatch,
+  getKidSafeContent,
+  getRecommendations,
+  verifyPin,
 };
