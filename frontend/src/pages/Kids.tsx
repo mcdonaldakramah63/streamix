@@ -13,28 +13,45 @@ const Kids = () => {
     if (!activeProfile?.isKids) return;
 
     const loadKidsContent = async () => {
-      try {
-        const res = await fetch(`/api/profiles/${activeProfile._id}/kids-content`, {
-          headers: {
-            Authorization: `Bearer ${localStorage.getItem('token') || ''}`,
-          },
-        });
+  try {
+    const token = localStorage.getItem('token');
+    if (!token) {
+      console.warn('No token found - user not logged in');
+      setKidRows([
+        { title: "Popular for Kids", items: [] },
+        { title: "Cartoons & Animation", items: [] },
+      ]);
+      setLoading(false);
+      return;
+    }
 
-        if (res.ok) {
-          const data = await res.json();
-          setKidRows(data.rows || []);
-        }
-      } catch (err) {
-        console.error('Failed to load kids content:', err);
-        // Fallback rows so page doesn't look broken
-        setKidRows([
-          { title: "Popular for Kids", items: [] },
-          { title: "Cartoons & Fun", items: [] },
-        ]);
-      } finally {
-        setLoading(false);
-      }
-    };
+    const res = await fetch(`/api/profiles/${activeProfile._id}/kids-content`, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`,
+      },
+    });
+
+    if (!res.ok) {
+      const errorText = await res.text();
+      console.error(`Kids content failed: ${res.status} - ${errorText}`);
+      throw new Error(`HTTP ${res.status}`);
+    }
+
+    const data = await res.json();
+    setKidRows(data.rows || []);
+  } catch (err) {
+    console.error('Failed to load kids content:', err);
+    // Graceful fallback
+    setKidRows([
+      { title: "Popular for Kids", items: [] },
+      { title: "Cartoons & Animation", items: [] },
+    ]);
+  } finally {
+    setLoading(false);
+  }
+};
 
     loadKidsContent();
   }, [activeProfile]);
