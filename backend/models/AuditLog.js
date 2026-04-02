@@ -16,5 +16,5 @@ auditSchema.index({ action: 1 })
 auditSchema.index({ createdAt: -1 })
 auditSchema.index({ ip: 1 })
 
-const ModelName = mongoose.models.ModelName || mongoose.model('ModelName', schema);
-module.exports = ModelName;
+const AuditLog = mongoose.models.AuditLog || mongoose.model('AuditLog', schema);
+module.exports = AuditLog;

@@ -10,5 +10,5 @@ const ratingSchema = new mongoose.Schema({
 
 ratingSchema.index({ userId: 1, tmdbId: 1, type: 1 }, { unique: true })
 
-const ModelName = mongoose.models.ModelName || mongoose.model('ModelName', schema);
-module.exports = ModelName;
+const Rating = mongoose.models.Rating || mongoose.model('Rating', schema);
+module.exports = Rating;
