@@ -1,9 +1,8 @@
-// frontend/src/pages/Kids.tsx — FULL REWRITE WITH FIX (uses your api service)
+// frontend/src/pages/Kids.tsx — FULL REWRITE WITH ROBUST FIX
 import React, { useEffect, useState } from 'react';
 import { useProfileStore } from '../stores/profileStore';
 import ContinueWatchingRow from '../components/ContinueWatchingRow';
 import Carousel from '../components/Carousel';
-import api from '../services/api';   // ← Using your existing api service
 
 const Kids = () => {
   const { activeProfile } = useProfileStore();
@@ -15,17 +14,41 @@ const Kids = () => {
 
     const loadKidsContent = async () => {
       try {
-        console.log('[Kids Debug] Loading content for profile:', activeProfile._id);
+        const token = localStorage.getItem('token');
+        const profileId = activeProfile._id;
 
-        const { data } = await api.get(`/profiles/${activeProfile._id}/kids-content`);
+        console.log('[Kids Debug] Token exists:', !!token);
+        console.log('[Kids Debug] Profile ID:', profileId);
 
-        console.log('[Kids Debug] Success! Received rows:', data.rows?.length || 0);
+        if (!token || !profileId) {
+          throw new Error('Missing token or profile ID');
+        }
+
+        const res = await fetch(`/api/profiles/${profileId}/kids-content`, {
+          method: 'GET',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`,
+          },
+        });
+
+        console.log(`[Kids Debug] Status: ${res.status} ${res.statusText}`);
+
+        // Read as text first to prevent JSON parse crash
+        const text = await res.text();
+        console.log('[Kids Debug] Raw response (first 300 chars):', text.substring(0, 300));
+
+        if (!res.ok) {
+          throw new Error(`HTTP ${res.status} - ${text.substring(0, 150)}`);
+        }
+
+        const data = JSON.parse(text);
+        console.log('[Kids Debug] Success! Data received:', data);
 
         setKidRows(data.rows || []);
       } catch (err: any) {
-        console.error('[Kids Debug] Error:', err.message || err);
-
-        // Graceful fallback so page never crashes
+        console.error('[Kids Debug] Final error:', err.message);
+        // Safe fallback so page never crashes
         setKidRows([
           { title: "Popular for Kids", items: [] },
           { title: "Cartoons & Animation", items: [] },
