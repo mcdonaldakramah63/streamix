@@ -1,8 +1,8 @@
-// frontend/src/pages/Kids.tsx
+// frontend/src/pages/Kids.tsx — FULL REWRITE WITH ROBUST ERROR HANDLING
 import React, { useEffect, useState } from 'react';
 import { useProfileStore } from '../stores/profileStore';
 import ContinueWatchingRow from '../components/ContinueWatchingRow';
-import Carousel from '../components/Carousel';        // you already use this in Home.tsx
+import Carousel from '../components/Carousel';
 
 const Kids = () => {
   const { activeProfile } = useProfileStore();
@@ -13,50 +13,56 @@ const Kids = () => {
     if (!activeProfile?.isKids) return;
 
     const loadKidsContent = async () => {
-  try {
-    const token = localStorage.getItem('token');
-    if (!token) {
-      console.warn('No token found - user not logged in');
-      setKidRows([
-        { title: "Popular for Kids", items: [] },
-        { title: "Cartoons & Animation", items: [] },
-      ]);
-      setLoading(false);
-      return;
-    }
+      try {
+        const token = localStorage.getItem('token');
+        const profileId = activeProfile._id;
 
-    const res = await fetch(`/api/profiles/${activeProfile._id}/kids-content`, {
-      method: 'GET',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`,
-      },
-    });
+        console.log('[Kids Debug] Token exists:', !!token);
+        console.log('[Kids Debug] Profile ID:', profileId);
 
-    if (!res.ok) {
-      const errorText = await res.text();
-      console.error(`Kids content failed: ${res.status} - ${errorText}`);
-      throw new Error(`HTTP ${res.status}`);
-    }
+        if (!token || !profileId) {
+          throw new Error('Missing token or profile ID');
+        }
 
-    const data = await res.json();
-    setKidRows(data.rows || []);
-  } catch (err) {
-    console.error('Failed to load kids content:', err);
-    // Graceful fallback
-    setKidRows([
-      { title: "Popular for Kids", items: [] },
-      { title: "Cartoons & Animation", items: [] },
-    ]);
-  } finally {
-    setLoading(false);
-  }
-};
+        const res = await fetch(`/api/profiles/${profileId}/kids-content`, {
+          method: 'GET',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`,
+          },
+        });
+
+        console.log(`[Kids Debug] Status: ${res.status} ${res.statusText}`);
+
+        // Read as text first to avoid JSON parse crash when HTML is returned
+        const text = await res.text();
+        console.log('[Kids Debug] Raw response (first 300 chars):', text.substring(0, 300));
+
+        if (!res.ok) {
+          throw new Error(`HTTP ${res.status} - ${text.substring(0, 150)}`);
+        }
+
+        // Safe JSON parse
+        const data = JSON.parse(text);
+        console.log('[Kids Debug] Success! Data received:', data);
+
+        setKidRows(data.rows || []);
+      } catch (err: any) {
+        console.error('[Kids Debug] Final error:', err.message);
+        // Graceful fallback - page never breaks
+        setKidRows([
+          { title: "Popular for Kids", items: [] },
+          { title: "Cartoons & Animation", items: [] },
+        ]);
+      } finally {
+        setLoading(false);
+      }
+    };
 
     loadKidsContent();
   }, [activeProfile]);
 
-  // Safety: redirect if not kids profile
+  // Safety redirect if not kids profile
   if (!activeProfile?.isKids) {
     return <div className="text-center py-20 text-white">Redirecting to home...</div>;
   }
@@ -73,7 +79,7 @@ const Kids = () => {
           </div>
         </div>
 
-        {/* Continue Watching - already works with your store */}
+        {/* Continue Watching */}
         <div className="mb-12">
           <ContinueWatchingRow isKidsMode={true} />
         </div>
