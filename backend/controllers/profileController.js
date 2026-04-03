@@ -1,11 +1,15 @@
-// backend/controllers/profileController.js — FIXED PIN SAVE
+// backend/controllers/profileController.js — FIXED PIN SAVE & VISIBILITY
 const Profile = require('../models/Profile');
+const axios = require('axios');
 
-// GET all profiles
+const TMDB_API = 'https://api.themoviedb.org/3';
+const TMDB_KEY = process.env.TMDB_API_KEY;
+
+// GET all profiles (pin field is now visible so switch logic works)
 const getProfiles = async (req, res) => {
   try {
     const profiles = await Profile.find({ user: req.user._id })
-      .select('-watchHistory -pin')
+      .select('-watchHistory')   // removed -pin so we can see if pin exists
       .sort({ createdAt: 1 })
       .lean();
     res.json(profiles);
@@ -30,7 +34,7 @@ const createProfile = async (req, res) => {
       color,
       isKids: Boolean(isKids),
       maturityLevel: Boolean(isKids) ? 'kids' : 'all',
-      pin: !isKids && pin ? pin : null,
+      pin: !Boolean(isKids) && pin ? pin : null,
     });
 
     res.status(201).json(profile);
@@ -39,7 +43,7 @@ const createProfile = async (req, res) => {
   }
 };
 
-// Update profile (including PIN)
+// Update profile (PIN now saves correctly)
 const updateProfile = async (req, res) => {
   try {
     const profile = await Profile.findOne({ _id: req.params.id, user: req.user._id });
@@ -53,13 +57,13 @@ const updateProfile = async (req, res) => {
     if (isKids !== undefined) {
       profile.isKids = Boolean(isKids);
       profile.maturityLevel = Boolean(isKids) ? 'kids' : 'all';
-      if (profile.isKids) profile.pin = null; // remove PIN from kids profile
+      if (profile.isKids) profile.pin = null; // remove PIN from kids profiles
     }
-    if (pin !== undefined && !profile.isKids) profile.pin = pin;
+    if (pin !== undefined && !profile.isKids) profile.pin = pin || null;
     if (maturityLevel) profile.maturityLevel = maturityLevel;
 
     await profile.save();
-    res.json(profile);
+    res.json(profile);   // return full profile so UI sees the new pin
   } catch (e) {
     res.status(500).json({ message: e.message });
   }
