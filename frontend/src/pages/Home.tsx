@@ -51,12 +51,13 @@ export default function Home() {
   
 
   // Kids redirect
-  useEffect(() => {
-    if (activeProfile?.isKids) {
-      navigate('/kids', { replace: true })
-    }
-  }, [activeProfile?.isKids, navigate])
-
+ // Replace the old kids redirect with this
+// In Home.tsx, replace the kids redirect useEffect with this
+useEffect(() => {
+  if (activeProfile?.isKids && window.location.pathname !== '/kids') {
+    navigate('/kids', { replace: true });
+  }
+}, [activeProfile?.isKids, navigate]);
   // Initial data fetch
   useEffect(() => {
     setHeroLoad(true)

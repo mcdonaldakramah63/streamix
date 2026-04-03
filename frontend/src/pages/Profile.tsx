@@ -1,14 +1,20 @@
-// frontend/src/pages/Profile.tsx — FULL REPLACEMENT
+// frontend/src/pages/Profile.tsx — FIXED PIN SAVE
 import { useEffect, useState } from 'react'
-import { useNavigate }         from 'react-router-dom'
-import { useAuthStore }        from '../context/authStore'
-import { useProfileStore }     from '../stores/profileStore'
-import api                     from '../services/api'
+import { useNavigate } from 'react-router-dom'
+import { useAuthStore } from '../context/authStore'
+import { useProfileStore } from '../stores/profileStore'
+import api from '../services/api'
 
 const AVATARS = ['🎬','📺','🎌','🎭','🚀','👻','💕','⚔️','🧙','🔍','🎵','🌍','👨‍👩‍👧','🎨','😂','🦸','🐉','🏆']
 const COLORS  = ['#14b8a6','#8b5cf6','#f59e0b','#ef4444','#3b82f6','#10b981','#f97316','#ec4899','#6366f1','#84cc16']
 
-interface FormState { name:string; avatar:string; color:string; isKids:boolean }
+interface FormState {
+  name: string
+  avatar: string
+  color: string
+  isKids: boolean
+  pin?: string
+}
 
 function ProfileCard({
   profile, isActive, onSelect, onEdit, onDelete,
@@ -30,6 +36,7 @@ function ProfileCard({
           </div>
           <div className="flex items-center gap-1.5 mt-0.5">
             {profile.isKids && <span className="text-[10px] bg-yellow-400/20 text-yellow-300 px-1.5 py-0.5 rounded-full font-bold">KIDS</span>}
+            {!profile.isKids && profile.pin && <span className="text-[10px] bg-amber-400/20 text-amber-300 px-1.5 py-0.5 rounded-full font-bold">🔒 PIN</span>}
           </div>
         </div>
       </div>
@@ -54,7 +61,10 @@ function ProfileCard({
 function ProfileForm({
   initial, onSave, onCancel, loading,
 }: {
-  initial:FormState; onSave:(f:FormState)=>void; onCancel:()=>void; loading:boolean
+  initial: FormState
+  onSave: (f: FormState) => void
+  onCancel: () => void
+  loading: boolean
 }) {
   const [form, setForm] = useState<FormState>(initial)
 
@@ -119,6 +129,22 @@ function ProfileForm({
         </button>
       </div>
 
+      {/* PIN for adult profiles */}
+      {!form.isKids && (
+        <div>
+          <label className="text-xs font-bold uppercase tracking-wider text-slate-500 block mb-1.5">PIN Protection (optional)</label>
+          <input
+            type="password"
+            maxLength={4}
+            value={form.pin || ''}
+            onChange={e => setForm(f => ({ ...f, pin: e.target.value }))}
+            placeholder="4-digit PIN (optional)"
+            className="input w-full"
+          />
+          <p className="text-[10px] text-slate-500 mt-1">Leave empty if you don't want PIN protection</p>
+        </div>
+      )}
+
       {/* Preview */}
       <div className="p-3 rounded-xl bg-dark-surface border border-dark-border">
         <p className="text-[10px] font-bold uppercase tracking-wider text-slate-600 mb-2">Preview</p>
@@ -131,6 +157,7 @@ function ProfileForm({
             <p className="text-sm font-bold text-white">{form.name || 'Untitled'}</p>
             <div className="flex gap-1 mt-0.5">
               {form.isKids && <span className="text-[10px] bg-yellow-400/20 text-yellow-300 px-1.5 py-0.5 rounded-full font-bold">KIDS</span>}
+              {!form.isKids && form.pin && <span className="text-[10px] bg-amber-400/20 text-amber-300 px-1.5 py-0.5 rounded-full font-bold">🔒 PIN</span>}
             </div>
           </div>
         </div>
@@ -151,22 +178,22 @@ function ProfileForm({
 }
 
 export default function Profile() {
-  const navigate     = useNavigate()
+  const navigate = useNavigate()
   const { user, setUser, logout } = useAuthStore()
   const { profiles, activeProfile, fetch: fetchProfiles, create, update, remove, setActive } = useProfileStore()
 
-  const [tab,         setTab]         = useState<'profiles'|'account'>('profiles')
-  const [editTarget,  setEditTarget]  = useState<any>(null)   // profile being edited
-  const [showCreate,  setShowCreate]  = useState(false)
+  const [tab, setTab] = useState<'profiles'|'account'>('profiles')
+  const [editTarget, setEditTarget] = useState<any>(null)
+  const [showCreate, setShowCreate] = useState(false)
   const [formLoading, setFormLoading] = useState(false)
-  const [deleteConfirm, setDeleteConfirm] = useState<string|null>(null)
+  const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null)
 
   // Account settings
   const [username, setUsername] = useState(user?.username || '')
-  const [email,    setEmail]    = useState(user?.email    || '')
-  const [pwForm,   setPwForm]   = useState({ current:'', next:'', confirm:'' })
-  const [acctMsg,  setAcctMsg]  = useState('')
-  const [acctErr,  setAcctErr]  = useState('')
+  const [email, setEmail] = useState(user?.email || '')
+  const [pwForm, setPwForm] = useState({ current: '', next: '', confirm: '' })
+  const [acctMsg, setAcctMsg] = useState('')
+  const [acctErr, setAcctErr] = useState('')
   const [acctLoad, setAcctLoad] = useState(false)
 
   useEffect(() => { if (user) fetchProfiles() }, [user?._id])
@@ -228,11 +255,11 @@ export default function Profile() {
 
   const changePassword = async () => {
     if (pwForm.next !== pwForm.confirm) return setAcctErr('Passwords do not match')
-    if (pwForm.next.length < 8)         return setAcctErr('Password must be at least 8 characters')
+    if (pwForm.next.length < 8) return setAcctErr('Password must be at least 8 characters')
     setAcctLoad(true); setAcctMsg(''); setAcctErr('')
     try {
       await api.put('/users/password', { currentPassword: pwForm.current, newPassword: pwForm.next })
-      setPwForm({ current:'', next:'', confirm:'' })
+      setPwForm({ current: '', next: '', confirm: '' })
       setAcctMsg('Password changed!')
     } catch (e: any) {
       setAcctErr(e?.response?.data?.message || 'Failed to change password')
@@ -267,10 +294,9 @@ export default function Profile() {
         ))}
       </div>
 
-      {/* ── Profiles tab ── */}
+      {/* Profiles tab */}
       {tab === 'profiles' && (
         <div>
-          {/* Profile list */}
           <div className="space-y-3 mb-4">
             {profiles.map(p => (
               <ProfileCard key={p._id} profile={p}
@@ -282,7 +308,6 @@ export default function Profile() {
             ))}
           </div>
 
-          {/* Add profile button */}
           {profiles.length < 5 && !showCreate && !editTarget && (
             <button onClick={() => { setShowCreate(true); setEditTarget(null) }}
               className="w-full py-3 rounded-2xl border-2 border-dashed border-dark-border text-slate-500 hover:border-brand/50 hover:text-brand text-sm font-semibold flex items-center justify-center gap-2 transition-all">
@@ -293,12 +318,11 @@ export default function Profile() {
             </button>
           )}
 
-          {/* Create form */}
           {showCreate && (
             <div className="card p-4 mt-3">
               <h3 className="text-base font-bold text-white mb-4" style={{ fontFamily:'Syne, sans-serif' }}>New Profile</h3>
               <ProfileForm
-                initial={{ name:'', avatar:'🎬', color:'#14b8a6', isKids:false }}
+                initial={{ name: '', avatar: '🎬', color: '#14b8a6', isKids: false, pin: '' }}
                 onSave={handleCreateSave}
                 onCancel={() => setShowCreate(false)}
                 loading={formLoading}
@@ -306,14 +330,19 @@ export default function Profile() {
             </div>
           )}
 
-          {/* Edit form */}
           {editTarget && (
             <div className="card p-4 mt-3">
               <h3 className="text-base font-bold text-white mb-4" style={{ fontFamily:'Syne, sans-serif' }}>
                 Edit: {editTarget.name}
               </h3>
               <ProfileForm
-                initial={{ name:editTarget.name, avatar:editTarget.avatar||'🎬', color:editTarget.color||'#14b8a6', isKids:!!editTarget.isKids }}
+                initial={{
+                  name: editTarget.name,
+                  avatar: editTarget.avatar || '🎬',
+                  color: editTarget.color || '#14b8a6',
+                  isKids: !!editTarget.isKids,
+                  pin: editTarget.pin || ''
+                }}
                 onSave={handleEditSave}
                 onCancel={() => setEditTarget(null)}
                 loading={formLoading}
@@ -321,7 +350,6 @@ export default function Profile() {
             </div>
           )}
 
-          {/* Delete confirm */}
           {deleteConfirm && (
             <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
               <div className="card p-5 max-w-sm w-full">
@@ -337,7 +365,7 @@ export default function Profile() {
         </div>
       )}
 
-      {/* ── Account tab ── */}
+      {/* Account tab */}
       {tab === 'account' && (
         <div className="space-y-4">
           <div className="card p-4">

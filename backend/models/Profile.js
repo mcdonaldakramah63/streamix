@@ -1,4 +1,4 @@
-// backend/models/Profile.js — FULL REWRITE WITH ROBUST KID MODE
+// backend/models/Profile.js — FIXED WITH PIN FIELD
 const mongoose = require('mongoose');
 
 const profileSchema = new mongoose.Schema({
@@ -16,16 +16,14 @@ const profileSchema = new mongoose.Schema({
     type:       { type: String, enum: ['movie', 'tv', 'anime'] },
     genres:     [Number],
     language:   String,
-    progress:   { type: Number, default: 0 },      // 0-100
+    progress:   { type: Number, default: 0 },
     completed:  { type: Boolean, default: false },
     watchedAt:  { type: Date, default: Date.now },
   }],
 
-  // For future parental controls
   blockedTitles: [String],
 }, { timestamps: true });
 
-// Indexes for performance on free Railway
 profileSchema.index({ user: 1 });
 profileSchema.index({ user: 1, isKids: 1 });
 

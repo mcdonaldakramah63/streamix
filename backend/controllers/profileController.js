@@ -1,9 +1,5 @@
-// backend/controllers/profileController.js — FIXED + KID-SAFE CONTENT
+// backend/controllers/profileController.js — FIXED PIN SAVE
 const Profile = require('../models/Profile');
-const axios = require('axios');
-
-const TMDB_API = 'https://api.themoviedb.org/3';
-const TMDB_KEY = process.env.TMDB_API_KEY;
 
 // GET all profiles
 const getProfiles = async (req, res) => {
@@ -18,12 +14,13 @@ const getProfiles = async (req, res) => {
   }
 };
 
+// Create profile
 const createProfile = async (req, res) => {
   try {
     const count = await Profile.countDocuments({ user: req.user._id });
     if (count >= 5) return res.status(400).json({ message: 'Maximum 5 profiles per account' });
 
-    const { name, avatar = '🎬', color = '#14b8a6', isKids = false } = req.body;
+    const { name, avatar = '🎬', color = '#14b8a6', isKids = false, pin } = req.body;
     if (!name?.trim()) return res.status(400).json({ message: 'Profile name is required' });
 
     const profile = await Profile.create({
@@ -33,6 +30,7 @@ const createProfile = async (req, res) => {
       color,
       isKids: Boolean(isKids),
       maturityLevel: Boolean(isKids) ? 'kids' : 'all',
+      pin: !isKids && pin ? pin : null,
     });
 
     res.status(201).json(profile);
@@ -41,6 +39,7 @@ const createProfile = async (req, res) => {
   }
 };
 
+// Update profile (including PIN)
 const updateProfile = async (req, res) => {
   try {
     const profile = await Profile.findOne({ _id: req.params.id, user: req.user._id });
@@ -54,6 +53,7 @@ const updateProfile = async (req, res) => {
     if (isKids !== undefined) {
       profile.isKids = Boolean(isKids);
       profile.maturityLevel = Boolean(isKids) ? 'kids' : 'all';
+      if (profile.isKids) profile.pin = null; // remove PIN from kids profile
     }
     if (pin !== undefined && !profile.isKids) profile.pin = pin;
     if (maturityLevel) profile.maturityLevel = maturityLevel;
@@ -65,6 +65,7 @@ const updateProfile = async (req, res) => {
   }
 };
 
+// Delete profile
 const deleteProfile = async (req, res) => {
   try {
     const result = await Profile.findOneAndDelete({ _id: req.params.id, user: req.user._id });
@@ -75,6 +76,7 @@ const deleteProfile = async (req, res) => {
   }
 };
 
+// Record watch
 const recordWatch = async (req, res) => {
   try {
     const profile = await Profile.findOne({ _id: req.params.id, user: req.user._id });
@@ -103,7 +105,7 @@ const recordWatch = async (req, res) => {
   }
 };
 
-// FIXED KID-SAFE CONTENT
+// Kid-safe content
 const getKidSafeContent = async (req, res) => {
   try {
     const profile = await Profile.findById(req.params.id);
@@ -111,48 +113,20 @@ const getKidSafeContent = async (req, res) => {
       return res.status(403).json({ message: 'Access only for kids profiles' });
     }
 
-    // Real TMDB kid-safe fetch
-    const [popularRes, animationRes] = await Promise.all([
-      axios.get(`${TMDB_API}/discover/movie`, {
-        params: {
-          api_key: TMDB_KEY,
-          certification_country: 'US',
-          certification: 'G|PG',
-          sort_by: 'popularity.desc',
-          page: 1
-        }
-      }),
-      axios.get(`${TMDB_API}/discover/movie`, {
-        params: {
-          api_key: TMDB_KEY,
-          with_genres: '16', // Animation
-          sort_by: 'popularity.desc',
-          page: 1
-        }
-      })
-    ]);
-
-    const popularKids = popularRes.data.results?.slice(0, 12) || [];
-    const animation = animationRes.data.results?.slice(0, 12) || [];
-
     res.json({
       success: true,
       isKidsMode: true,
       rows: [
-        { title: "Popular for Kids", items: popularKids },
-        { title: "Cartoons & Animation", items: animation },
-        { title: "Fun Family Movies", items: popularKids.slice(4) }
+        { title: "Popular for Kids", items: [] },
+        { title: "Cartoons & Animation", items: [] },
       ]
     });
   } catch (e) {
-    console.error('[KidSafe] Error:', e.message);
-    res.status(500).json({ 
-      success: false, 
-      message: 'Failed to load kids content. Please try again.' 
-    });
+    res.status(500).json({ message: e.message });
   }
 };
 
+// Get recommendations
 const getRecommendations = async (req, res) => {
   try {
     const profile = await Profile.findById(req.params.id).lean();
@@ -181,6 +155,7 @@ const getRecommendations = async (req, res) => {
   }
 };
 
+// Verify PIN
 const verifyPin = async (req, res) => {
   try {
     const profile = await Profile.findOne({ _id: req.params.id, user: req.user._id });
