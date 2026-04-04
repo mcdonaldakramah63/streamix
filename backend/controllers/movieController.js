@@ -36,8 +36,17 @@ const season = async (req, res) => {
 const search = async (req, res) => {
   const { query, page = 1, type = 'multi' } = req.query;
   if (!query) return res.status(400).json({ message: 'Query required' });
+
   try {
-    const d = await cachedTmdb(`/search/${type}`, { query, page });
+    const params = { query, page };
+
+    // If user is in kids mode, filter adult content
+    if (req.query.isKids === 'true') {
+      params.certification_country = 'US';
+      params.certification = 'G|PG';
+    }
+
+    const d = await cachedTmdb(`/search/${type}`, params);
     res.json(d);
   } catch (e) { res.status(500).json({ message: e.message }); }
 };

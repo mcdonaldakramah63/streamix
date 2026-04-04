@@ -1,15 +1,15 @@
-// backend/controllers/profileController.js — FIXED PIN SAVE & VISIBILITY
+// backend/controllers/profileController.js — FINAL KID MODE VERSION
 const Profile = require('../models/Profile');
 const axios = require('axios');
 
 const TMDB_API = 'https://api.themoviedb.org/3';
 const TMDB_KEY = process.env.TMDB_API_KEY;
 
-// GET all profiles (pin field is now visible so switch logic works)
+// GET all profiles
 const getProfiles = async (req, res) => {
   try {
     const profiles = await Profile.find({ user: req.user._id })
-      .select('-watchHistory')   // removed -pin so we can see if pin exists
+      .select('-watchHistory')
       .sort({ createdAt: 1 })
       .lean();
     res.json(profiles);
@@ -43,7 +43,7 @@ const createProfile = async (req, res) => {
   }
 };
 
-// Update profile (PIN now saves correctly)
+// Update profile
 const updateProfile = async (req, res) => {
   try {
     const profile = await Profile.findOne({ _id: req.params.id, user: req.user._id });
@@ -57,13 +57,13 @@ const updateProfile = async (req, res) => {
     if (isKids !== undefined) {
       profile.isKids = Boolean(isKids);
       profile.maturityLevel = Boolean(isKids) ? 'kids' : 'all';
-      if (profile.isKids) profile.pin = null; // remove PIN from kids profiles
+      if (profile.isKids) profile.pin = null;
     }
     if (pin !== undefined && !profile.isKids) profile.pin = pin || null;
     if (maturityLevel) profile.maturityLevel = maturityLevel;
 
     await profile.save();
-    res.json(profile);   // return full profile so UI sees the new pin
+    res.json(profile);
   } catch (e) {
     res.status(500).json({ message: e.message });
   }
@@ -109,7 +109,7 @@ const recordWatch = async (req, res) => {
   }
 };
 
-// Kid-safe content
+// KID-SAFE CONTENT - Real TMDB filtered
 const getKidSafeContent = async (req, res) => {
   try {
     const profile = await Profile.findById(req.params.id);
@@ -117,16 +117,41 @@ const getKidSafeContent = async (req, res) => {
       return res.status(403).json({ message: 'Access only for kids profiles' });
     }
 
+    const [popularRes, animationRes] = await Promise.all([
+      axios.get(`${TMDB_API}/discover/movie`, {
+        params: {
+          api_key: TMDB_KEY,
+          certification_country: 'US',
+          certification: 'G|PG',
+          sort_by: 'popularity.desc',
+          page: 1
+        }
+      }),
+      axios.get(`${TMDB_API}/discover/movie`, {
+        params: {
+          api_key: TMDB_KEY,
+          with_genres: '16', // Animation
+          sort_by: 'popularity.desc',
+          page: 1
+        }
+      })
+    ]);
+
+    const popularKids = popularRes.data.results?.slice(0, 12) || [];
+    const animation = animationRes.data.results?.slice(0, 12) || [];
+
     res.json({
       success: true,
       isKidsMode: true,
       rows: [
-        { title: "Popular for Kids", items: [] },
-        { title: "Cartoons & Animation", items: [] },
+        { title: "Popular for Kids", items: popularKids },
+        { title: "Cartoons & Animation", items: animation },
+        { title: "Fun Family Movies", items: popularKids.slice(4) }
       ]
     });
   } catch (e) {
-    res.status(500).json({ message: e.message });
+    console.error('[KidSafe] Error:', e.message);
+    res.status(500).json({ success: false, message: 'Failed to load kids content' });
   }
 };
 
