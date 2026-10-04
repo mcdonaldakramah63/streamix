@@ -112,21 +112,21 @@ export default function TVShows() {
         <div className="skeleton" style={{ height:'clamp(240px,42vw,440px)' }} />
       ) : hero ? (
         <div className="relative overflow-hidden" style={{ height:'clamp(240px,42vw,440px)' }}>
-          <img src={`https://image.tmdb.org/t/p/w1280${hero.backdrop_path}`} alt=""
+          <img src={hero.backdrop_path ? `https://image.tmdb.org/t/p/original${hero.backdrop_path}` : ''} alt=""
             className="absolute inset-0 w-full h-full object-cover object-top" />
           <div className="absolute inset-0 bg-hero-gradient" />
-          <div className="absolute inset-0" style={{ background:'linear-gradient(to top,#07080c 0%,transparent 45%)' }} />
+          <div className="absolute inset-0" style={{ background:'linear-gradient(to top,#0f131c 0%,transparent 45%)' }} />
           <div className="absolute bottom-8 sm:bottom-12 left-4 sm:left-8 right-4 max-w-xl">
             <span className="badge-brand text-[11px] mb-3 inline-flex">📺 Trending Show</span>
             <h1 className="font-bold text-shadow mb-2 leading-tight"
-              style={{ fontFamily:'Syne, sans-serif', fontSize:'clamp(1.4rem,4vw,2.8rem)' }}>
+              style={{ fontFamily:'Plus Jakarta Sans, sans-serif', fontSize:'clamp(1.4rem,4vw,2.8rem)' }}>
               {hero.name}
             </h1>
-            <div className="flex items-center gap-3 mb-4 text-sm text-slate-400">
+            <div className="flex items-center gap-3 mb-4 text-sm text-ink-muted">
               {(hero.vote_average||0) >= 7 && <span className="badge-gold">★ {hero.vote_average?.toFixed(1)}</span>}
               <span>{hero.first_air_date?.slice(0,4)}</span>
             </div>
-            <p className="text-slate-300 text-sm line-clamp-2 mb-5 hidden sm:block max-w-md">{hero.overview}</p>
+            <p className="text-ink text-sm line-clamp-2 mb-5 hidden sm:block max-w-md">{hero.overview}</p>
             <div className="flex gap-2.5">
               <button onClick={() => navigate(`/player/tv/${hero.id}?season=1&episode=1`)} className="btn-primary px-5 py-2.5 text-sm">▶ Watch S1E1</button>
               <button onClick={() => navigate(`/tv/${hero.id}`)} className="btn-secondary px-5 py-2.5 text-sm">Details</button>
@@ -151,13 +151,13 @@ export default function TVShows() {
         <div className="flex flex-col sm:flex-row sm:items-center gap-3 mb-5">
           <div>
             <h2 className="section-title">Browse TV Shows</h2>
-            {!gridLoad && <p className="text-xs text-slate-600 mt-0.5">{shows.length}+ shows</p>}
+            {!gridLoad && <p className="text-xs text-ink-faint mt-0.5">{shows.length}+ shows</p>}
           </div>
           <div className="sm:ml-auto flex items-center gap-2.5 bg-dark-surface border border-dark-border rounded-xl px-4 py-2.5 w-full sm:max-w-xs focus-within:border-brand/40 transition-colors">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-slate-500 flex-shrink-0"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-ink-faint flex-shrink-0"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
             <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search shows…"
               className="bg-transparent outline-none text-sm text-white placeholder-slate-500 flex-1" />
-            {search && <button onClick={() => setSearch('')} className="text-slate-500 hover:text-white text-xs">✕</button>}
+            {search && <button onClick={() => setSearch('')} className="text-ink-faint hover:text-white text-xs">✕</button>}
           </div>
         </div>
 
@@ -167,16 +167,16 @@ export default function TVShows() {
               {GENRES.map(g => (
                 <button key={g.id} onClick={() => setGenre(g.id)}
                   className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold flex-shrink-0 border transition-all whitespace-nowrap ${
-                    genre===g.id ? 'bg-brand text-dark border-brand scale-105' : 'bg-dark-card border-dark-border text-slate-400 hover:border-brand/40 hover:text-white'
+                    genre===g.id ? 'bg-brand text-white border-brand scale-105' : 'bg-dark-card border-dark-border text-ink-muted hover:border-brand/40 hover:text-white'
                   }`}>
                   <span>{g.icon}</span>{g.label}
                 </button>
               ))}
             </div>
             <div className="flex items-center gap-3 mb-5">
-              <span className="text-xs text-slate-600">Sort:</span>
+              <span className="text-xs text-ink-faint">Sort:</span>
               <select value={sort} onChange={e => setSort(e.target.value)}
-                className="bg-dark-card border border-dark-border rounded-xl px-3 py-1.5 text-xs text-slate-300 outline-none cursor-pointer hover:border-brand/40 transition-colors">
+                className="bg-dark-card border border-dark-border rounded-xl px-3 py-1.5 text-xs text-ink outline-none cursor-pointer hover:border-brand/40 transition-colors">
                 {SORT.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
               </select>
             </div>
@@ -185,7 +185,7 @@ export default function TVShows() {
 
         {searchQ && (
           <div className="flex items-center gap-3 mb-5">
-            <p className="text-sm text-slate-400">Results for <span className="text-white font-semibold">"{searchQ}"</span></p>
+            <p className="text-sm text-ink-muted">Results for <span className="text-white font-semibold">"{searchQ}"</span></p>
             <button onClick={() => { setSearch(''); setSearchQ('') }} className="text-xs text-brand hover:underline">Clear</button>
           </div>
         )}
@@ -195,7 +195,7 @@ export default function TVShows() {
             {Array(18).fill(0).map((_,i) => <div key={i} className="skeleton rounded-xl" style={{ aspectRatio:'2/3' }} />)}
           </div>
         ) : shows.length === 0 ? (
-          <div className="flex flex-col items-center py-20 text-slate-500 gap-3">
+          <div className="flex flex-col items-center py-20 text-ink-faint gap-3">
             <span className="text-5xl">📺</span>
             <p>No shows found{searchQ ? ` for "${searchQ}"` : ''}</p>
             <button onClick={() => { setGenre(0); setSort('popularity.desc'); setSearch('') }} className="text-brand text-sm hover:underline">Reset</button>
@@ -207,7 +207,7 @@ export default function TVShows() {
             </div>
             <div ref={sentinel} className="h-4 mt-4" />
             {busy && <div className="flex justify-center py-8"><div className="w-7 h-7 border-2 border-dark-border border-t-brand rounded-full animate-spin" /></div>}
-            {!hasMore && shows.length > 0 && <p className="text-center text-xs text-slate-700 py-8">— End of list —</p>}
+            {!hasMore && shows.length > 0 && <p className="text-center text-xs text-ink-faint py-8">— End of list —</p>}
           </>
         )}
       </section>

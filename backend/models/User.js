@@ -46,6 +46,40 @@ const userSchema = new mongoose.Schema(
     recentlyViewed:   { type: [mongoose.Schema.Types.Mixed], default: [] },
     loginAttempts:    { type: Number, default: 0 },
     lockUntil:        { type: Date,   default: null },
+    suspended:        { type: Boolean, default: false },
+    suspendedReason:  { type: String,  default: '' },
+    lastActiveAt:     { type: Date,    default: null },
+    // Bumped to sign out every device (password change, "sign out everywhere", suspension)
+    tokenVersion:     { type: Number,  default: 0 },
+    // Everything in the notification inbox newer than this is unread
+    notificationsSeenAt: { type: Date, default: () => new Date() },
+    // ── Email ownership ──
+    // Accounts from before verification existed count as verified (the default); new sign-ups start false
+    emailVerified:    { type: Boolean, default: true },
+    emailCanonical:   { type: String,  default: undefined, index: true }, // "j.o.e+x@gmail.com" → "joe@gmail.com"
+    pendingEmail:     { type: String,  default: null },                   // new address waiting for its code
+    emailCode: {                                                          // the current one-time code (hashed)
+      hash:        { type: String, select: false },
+      purpose:     { type: String, select: false },
+      expires:     { type: Date,   select: false },
+      attempts:    { type: Number, select: false },
+      sentAt:      { type: Date,   select: false },
+      sends:       { type: Number, select: false },
+      windowStart: { type: Date,   select: false },
+    },
+    // ── Notifications ──
+    tz:          { type: String, default: '' },                         // IANA zone from the browser/app ("Africa/Nairobi")
+    notifyPrefs: { type: mongoose.Schema.Types.Mixed, default: undefined }, // see utils/notifyEngine DEFAULT_PREFS
+    notifyStats: { type: mongoose.Schema.Types.Mixed, default: undefined }, // { kind: { sent, opened } }, decayed weekly
+    activeHours: { type: mongoose.Schema.Types.Mixed, default: undefined }, // { "0".."23": weight } in the user's own time
+    // Two-factor sign-in (authenticator app). Secrets and backup codes never leave the server.
+    twoFactor: {
+      enabled:       { type: Boolean, default: false },
+      secret:        { type: String,  default: null, select: false },
+      pendingSecret: { type: String,  default: null, select: false },
+      recovery:      { type: [String], default: [], select: false },   // sha256 of unused backup codes
+      lastStep:      { type: Number,  default: -1, select: false },    // stops a code being reused
+    },
   },
   { timestamps: true }
 )

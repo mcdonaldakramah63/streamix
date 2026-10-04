@@ -1,2 +1,41 @@
-# Local Netlify folder
+# Dependencies & builds
+node_modules/
+frontend/dist/
+
+# Secrets — never commit these
+.env
+backend/.env
+frontend/.env
+api keys
+
+# Local tooling
 .netlify
+.idea/
+*.log
+
+# Android
+android/.gradle/
+android/.kotlin/
+android/build/
+android/app/build/
+android/local.properties
+*.apk
+
+# User-uploaded profile photos
+backend/uploads/
+
+# Videos stored on this computer for the library (see scripts/library-upload.js)
+backend/media/
+
+# Not part of Streamix (separate Python project + its virtualenv)
+vaporpic-master/
+backend/vaporpic-master/
+venv/
+__pycache__/
+
+# Editor / agent tooling, signing keys, env variants
+.claude/
+*.jks
+*.keystore
+.env.*
+!.env.example

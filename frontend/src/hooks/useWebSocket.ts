@@ -1,172 +1,92 @@
-// frontend/src/hooks/useWebSocket.ts — FULL REPLACEMENT
-// FIXES:
-//   1. JWT tokens expire in 15 min — WebSocket now refreshes the token before reconnecting
-//   2. Exponential backoff caps at 30s and resets on success
-//   3. Stops reconnecting when user is logged out
-//   4. Properly cleans up on unmount
-
-import { useEffect, useRef, useCallback } from 'react'
-import { useAuthStore } from '../context/authStore'
+// frontend/src/hooks/useWebSocket.ts — one shared socket for cross-device progress sync
+import { useEffect } from 'react'
+import { useAuthStore, isTokenExpired } from '../context/authStore'
 import { useContinueWatching } from '../stores/continueWatchingStore'
-import api from '../services/api'
+import { refreshAccessToken } from '../services/api'
 
-const WS_BASE = import.meta.env.VITE_BACKEND_URL
-  ? import.meta.env.VITE_BACKEND_URL
-      .replace('/api', '')
-      .replace('https://', 'wss://')
-      .replace('http://', 'ws://')
-  : 'wss://streamix-production-1cb4.up.railway.app'
+const WS_URL = () => `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`
 
-// Token refresh helper — gets a fresh access token from the refresh endpoint
-async function refreshToken(): Promise<string | null> {
-  try {
-    const { data } = await api.post('/auth/refresh', {}, { withCredentials: true })
-    const token = data?.token || data?.accessToken
-    if (token) {
-      // Update stored user with new token
-      const stored = localStorage.getItem('streamix_user')
-      if (stored) {
-        const user = JSON.parse(stored)
-        user.token = token
-        localStorage.setItem('streamix_user', JSON.stringify(user))
-      }
-      return token
-    }
-  } catch {
-    // Refresh failed — token truly expired, let auth store handle logout
-  }
-  return null
+let socket: WebSocket | null = null
+let timer: ReturnType<typeof setTimeout> | undefined
+let backoff = 1000
+let active = false
+
+// Simple message bus so features (watch party, stream limits) can share this one socket
+type Handler = (msg: any) => void
+const handlers = new Set<Handler>()
+/** Listen to every server message; returns an unsubscribe function */
+export function onWsMessage(fn: Handler) { handlers.add(fn); return () => { handlers.delete(fn) } }
+/** Send a message if connected; returns whether it was sent */
+export function wsSend(msg: Record<string, unknown>) {
+  if (socket?.readyState === WebSocket.OPEN) { socket.send(JSON.stringify(msg)); return true }
+  return false
 }
+export const wsConnected = () => socket?.readyState === WebSocket.OPEN
 
-// Check if a JWT is expired (with 30s buffer)
-function isTokenExpired(token: string): boolean {
-  try {
-    const payload = JSON.parse(atob(token.split('.')[1]))
-    return payload.exp * 1000 < Date.now() + 30_000 // 30s buffer
-  } catch {
-    return true
+async function connect() {
+  if (!active || socket) return
+  let token = useAuthStore.getState().user?.token
+  if (!token) return
+  if (isTokenExpired(token)) {
+    token = (await refreshAccessToken()) || undefined
+    if (!token || !active) return
   }
-}
 
-export function useWebSocket() {
-  const { user }              = useAuthStore()
-  const { saveTimestamp }     = useContinueWatching()
+  const ws = new WebSocket(`${WS_URL()}?token=${encodeURIComponent(token)}`)
+  socket = ws
 
-  const wsRef     = useRef<WebSocket | null>(null)
-  const timerRef  = useRef<ReturnType<typeof setTimeout>>()
-  const backoff   = useRef(1000)
-  const stopped   = useRef(false)
-  const mountedRef = useRef(true)
+  ws.onopen = () => { backoff = 1000 }
 
-  const connect = useCallback(async () => {
-    if (stopped.current || !mountedRef.current) return
-
-    // Don't connect if no user
-    const { user: currentUser } = useAuthStore.getState()
-    if (!currentUser?.token) return
-
-    // Don't open duplicate connection
-    if (wsRef.current?.readyState === WebSocket.OPEN) return
-
-    let token = currentUser.token
-
-    // Refresh token if expired
-    if (isTokenExpired(token)) {
-      const fresh = await refreshToken()
-      if (!fresh) {
-        console.log('[WS] Token expired and refresh failed — not connecting')
-        return
-      }
-      token = fresh
-    }
-
+  ws.onmessage = (event) => {
     try {
-      const ws = new WebSocket(`${WS_BASE}/ws?token=${token}`)
-      wsRef.current = ws
-
-      ws.onopen = () => {
-        if (!mountedRef.current) { ws.close(); return }
-        console.log('[WS] Connected')
-        backoff.current = 1000 // reset backoff on success
+      const msg = JSON.parse(event.data)
+      handlers.forEach(h => { try { h(msg) } catch { /* listener errors stay local */ } })
+      if (msg.type === 'PROGRESS_SYNC') {
+        useContinueWatching.getState().applyRemote(
+          Number(msg.movieId), Number(msg.timestamp) || 0, msg.duration, msg.season, msg.episode
+        )
       }
+    } catch { /* ignore malformed messages */ }
+  }
 
-      ws.onmessage = (event) => {
-        try {
-          const msg = JSON.parse(event.data)
-          if (msg.type === 'PROGRESS_SYNC') {
-            saveTimestamp(msg.movieId, msg.timestamp)
-          }
-        } catch { /* ignore malformed messages */ }
-      }
-
-      ws.onclose = (event) => {
-        wsRef.current = null
-        if (!mountedRef.current || stopped.current) return
-
-        // 4001 = unauthorized (token expired) — try to refresh before reconnecting
-        if (event.code === 4001) {
-          console.log('[WS] Auth error — refreshing token')
-          refreshToken().then(fresh => {
-            if (fresh && mountedRef.current && !stopped.current) {
-              timerRef.current = setTimeout(connect, 1000)
-            }
-          })
-          return
-        }
-
-        // Normal reconnect with exponential backoff
-        const delay = Math.min(backoff.current, 30_000)
-        console.log(`[WS] Disconnected — reconnecting in ${delay}ms`)
-        backoff.current = Math.min(backoff.current * 2, 30_000)
-        timerRef.current = setTimeout(connect, delay)
-      }
-
-      ws.onerror = () => {
-        // onclose fires immediately after — don't double-handle
-        ws.close()
-      }
-    } catch (err) {
-      console.warn('[WS] Connection error:', err)
-      const delay = Math.min(backoff.current, 30_000)
-      backoff.current = Math.min(backoff.current * 2, 30_000)
-      if (mountedRef.current && !stopped.current) {
-        timerRef.current = setTimeout(connect, delay)
-      }
+  ws.onclose = async (event) => {
+    if (socket === ws) socket = null
+    handlers.forEach(h => { try { h({ type: 'DISCONNECTED' }) } catch { /* ignore */ } })
+    if (!active) return
+    if (event.code === 4001) {
+      // Token rejected — refresh it, then reconnect
+      const fresh = await refreshAccessToken()
+      if (!fresh) return
     }
-  }, [saveTimestamp])
+    const delay = Math.min(backoff, 30_000)
+    backoff = Math.min(backoff * 2, 30_000)
+    timer = setTimeout(connect, delay)
+  }
 
+  ws.onerror = () => ws.close()
+}
+
+function disconnect() {
+  active = false
+  clearTimeout(timer)
+  socket?.close()
+  socket = null
+}
+
+/** Broadcast playback progress to this user's other devices */
+export function sendProgress(movieId: number, timestamp: number, duration?: number, season?: number, episode?: number) {
+  if (socket?.readyState === WebSocket.OPEN) {
+    socket.send(JSON.stringify({ type: 'PROGRESS_UPDATE', movieId, timestamp, duration, season, episode }))
+  }
+}
+
+/** Mount once (App) — keeps the socket open while a user is logged in */
+export function useWebSocket() {
+  const userId = useAuthStore(s => s.user?._id)
   useEffect(() => {
-    mountedRef.current = true
-    stopped.current    = false
-
-    if (user?.token) {
-      connect()
-    }
-
-    return () => {
-      mountedRef.current = false
-      stopped.current    = true
-      clearTimeout(timerRef.current)
-      if (wsRef.current) {
-        wsRef.current.close()
-        wsRef.current = null
-      }
-    }
-  }, [user?.token, connect])
-
-  // Send progress to other devices
-  const sendProgress = useCallback((
-    movieId: number,
-    timestamp: number,
-    season?: number,
-    episode?: number,
-  ) => {
-    if (wsRef.current?.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({
-        type: 'PROGRESS_UPDATE', movieId, timestamp, season, episode,
-      }))
-    }
-  }, [])
-
-  return { sendProgress }
+    if (!userId) return
+    active = true
+    connect()
+    return disconnect
+  }, [userId])
 }

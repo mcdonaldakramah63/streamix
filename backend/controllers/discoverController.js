@@ -1,7 +1,6 @@
 // backend/controllers/discoverController.js — FULL REPLACEMENT
 const axios = require('axios')
 
-const TMDB_KEY = () => process.env.TMDB_API_KEY
 const TMDB_BASE = 'https://api.themoviedb.org/3'
 
 // 5-minute cache
@@ -67,6 +66,20 @@ exports.discover = async (req, res) => {
     if (airFrom && type === 'movie') params['release_date.gte'] = airFrom
     if (airTo   && type === 'movie') params['release_date.lte'] = airTo
 
+    // Exclusions requested by the client (comma-separated genre ids)
+    if (req.query.without_genres) params.without_genres = String(req.query.without_genres)
+
+    // Kids profiles: G / PG movies, and TV without mature genres (TMDB has no TV certification filter)
+    if (req.query.kids === 'true') {
+      if (type === 'movie') {
+        params.certification_country = 'US'
+        params['certification.lte']  = 'PG'
+        params.without_genres = [params.without_genres, '27,53,80,10752'].filter(Boolean).join(',')
+      } else {
+        params.without_genres = [params.without_genres, '80,10768,10766,10767,10763,10764,9648,27'].filter(Boolean).join(',')
+      }
+    }
+
     // Adult filter off
     params.include_adult = false
 
@@ -76,7 +89,9 @@ exports.discover = async (req, res) => {
 
     console.log(`[Discover] ${type} sort=${params.sort_by} genres=${params.with_genres || 'all'} lang=${params.with_original_language || 'any'} page=${params.page}`)
 
-    const { data } = await axios.get(endpoint, { params, timeout: 12000 })
+    // Shared client: cache, stale copies during outages, rate limiting, retries (config/tmdb.js)
+    const { api_key: _k, ...rest } = params
+    const data = await require('../config/tmdb').cachedTmdb(endpoint.replace(TMDB_BASE, ''), rest)
     setCache(cacheKey, data)
     res.json(data)
 
@@ -99,10 +114,7 @@ exports.nowPlaying = async (req, res) => {
     const cached = getCache(cacheKey)
     if (cached) return res.json(cached)
 
-    const { data } = await axios.get(`${TMDB_BASE}/movie/now_playing`, {
-      params: { api_key: key, page, language: 'en-US' },
-      timeout: 12000,
-    })
+    const data = await require('../config/tmdb').cachedTmdb('/movie/now_playing', { page, language: 'en-US' })
     setCache(cacheKey, data)
     res.json(data)
 

@@ -1,65 +1,28 @@
-// frontend/src/components/ShareButton.tsx — FULL REPLACEMENT
 import { useState } from 'react'
+import Icon from './Icon'
 
-interface Props {
-  title: string
-  url?:  string
-}
-
-export default function ShareButton({ title, url }: Props) {
-  const [state, setState] = useState<'idle'|'copied'|'shared'>('idle')
+export default function ShareButton({ title, url }: { title: string; url?: string }) {
+  const [state, setState] = useState<'idle' | 'copied' | 'shared'>('idle')
   const shareUrl = url || window.location.href
+
+  const flash = (s: 'copied' | 'shared') => { setState(s); setTimeout(() => setState('idle'), 2000) }
 
   const handleShare = async () => {
     if (navigator.share) {
-      try {
-        await navigator.share({ title, url: shareUrl })
-        setState('shared')
-        setTimeout(() => setState('idle'), 2000)
-        return
-      } catch { /* cancelled or unsupported */ }
+      try { await navigator.share({ title, url: shareUrl }); flash('shared'); return }
+      catch (e: any) { if (e?.name === 'AbortError') return }
     }
-    try {
-      await navigator.clipboard.writeText(shareUrl)
-      setState('copied')
-      setTimeout(() => setState('idle'), 2000)
-    } catch {
-      prompt('Copy this link:', shareUrl)
-    }
+    try { await navigator.clipboard.writeText(shareUrl); flash('copied') }
+    catch { window.prompt('Copy this link:', shareUrl) }
   }
 
   return (
-    <button
-      onClick={handleShare}
-      className={`flex items-center gap-2 px-3.5 py-2.5 rounded-xl border text-xs font-medium transition-all duration-200 active:scale-95 ${
-        state !== 'idle'
-          ? 'bg-brand/10 border-brand/40 text-brand'
-          : 'bg-dark-card border-dark-border text-slate-400 hover:border-brand/40 hover:text-white'
+    <button onClick={handleShare}
+      className={`h-11 px-2 sm:px-4 rounded-full flex items-center justify-center gap-1 sm:gap-1.5 text-[13px] sm:text-sm font-semibold whitespace-nowrap transition-all active:scale-95 ${
+        state !== 'idle' ? 'bg-cyan/15 text-cyan' : 'bg-dark-border text-ink hover:bg-dark-high'
       }`}>
-      {state === 'copied' ? (
-        <>
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-            <polyline points="20 6 9 17 4 12"/>
-          </svg>
-          Copied!
-        </>
-      ) : state === 'shared' ? (
-        <>
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-            <polyline points="20 6 9 17 4 12"/>
-          </svg>
-          Shared!
-        </>
-      ) : (
-        <>
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/>
-            <polyline points="16 6 12 2 8 6"/>
-            <line x1="12" y1="2" x2="12" y2="15"/>
-          </svg>
-          Share
-        </>
-      )}
+      <Icon name={state === 'idle' ? 'share' : 'check'} size={18} />
+      {state === 'copied' ? 'Copied' : state === 'shared' ? 'Shared' : 'Share'}
     </button>
   )
 }

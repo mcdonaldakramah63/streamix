@@ -1,269 +1,196 @@
-// frontend/src/pages/admin/Dashboard.tsx — FULL REPLACEMENT
-import { useEffect, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+// frontend/src/pages/admin/Dashboard.tsx — "Admin · User Management & Audit Logs" (Stitch design)
+import { useEffect, useState, useCallback } from 'react'
 import { useAuthStore } from '../../context/authStore'
-import api from '../../services/api'
+import api, { errorMessage } from '../../services/api'
+import Icon from '../../components/Icon'
+import Collections from '../../components/admin/Collections'
+import Reports from '../../components/admin/Reports'
+import AppSettings from '../../components/admin/AppSettings'
+import LibraryImport from '../../components/LibraryImport'
+import Analytics from '../../components/admin/Analytics'
+import UserDetailModal from '../../components/admin/UserDetailModal'
+import Announcements from '../../components/admin/Announcements'
+import OfficialAnime from '../../components/admin/OfficialAnime'
 
 interface Stats {
-  totalUsers:    number
-  totalWatchlist:number
-  newUsersToday: number
-  activeUsers:   number
+  totalUsers: number; adminUsers: number; totalWatchlist: number
+  newUsersToday: number; activeUsers: number; lockedAccounts: number
+  blockedIPs: { ip: string; reason?: string; expiresIn: string }[]
 }
+interface UserRow { _id: string; username: string; email: string; isAdmin: boolean; createdAt: string; loginAttempts: number; lockUntil?: string | null; suspended?: boolean; lastActiveAt?: string | null; emailVerified?: boolean }
+interface LogRow { _id: string; action: string; email?: string; ip?: string; severity: 'info' | 'warn' | 'critical'; createdAt: string; details?: any }
 
-interface UserRow {
-  _id:       string
-  username:  string
-  email:     string
-  isAdmin:   boolean
-  createdAt: string
-  loginAttempts: number
-}
+type Tab = 'overview' | 'users' | 'library' | 'official' | 'collections' | 'reports' | 'announcements' | 'settings' | 'security'
+const PAGE = 15
 
-type Tab = 'overview' | 'users' | 'security'
+const SEVERITY = { info: 'text-ink-muted', warn: 'text-gold', critical: 'text-brand-soft' }
 
 export default function AdminDashboard() {
-  const navigate  = useNavigate()
-  const { user }  = useAuthStore()
+  const me = useAuthStore(s => s.user)
+  const [tab,     setTab]     = useState<Tab>('overview')
+  const [stats,   setStats]   = useState<Stats | null>(null)
+  const [users,   setUsers]   = useState<UserRow[]>([])
+  const [total,   setTotal]   = useState(0)
+  const [page,    setPage]    = useState(1)
+  const [search,  setSearch]  = useState('')
+  const [query,   setQuery]   = useState('')
+  const [logs,    setLogs]    = useState<LogRow[]>([])
+  const [logSev,  setLogSev]  = useState<'' | 'warn' | 'critical'>('')
+  const [error,   setError]   = useState('')
+  const [loading, setLoading] = useState(true)
+  const [openUser, setOpenUser] = useState<string | null>(null)
 
-  const [tab,      setTab]      = useState<Tab>('overview')
-  const [stats,    setStats]    = useState<Stats | null>(null)
-  const [users,    setUsers]    = useState<UserRow[]>([])
-  const [loading,  setLoading]  = useState(true)
-  const [search,   setSearch]   = useState('')
-  const [page,     setPage]     = useState(1)
-  const [total,    setTotal]    = useState(0)
+  const loadStats = useCallback(() => api.get('/admin/stats').then(r => setStats(r.data)).catch(e => setError(errorMessage(e))), [])
 
-  useEffect(() => {
-    if (!user?.isAdmin) { navigate('/'); return }
-    fetchData()
-  }, [user])
-
-  useEffect(() => { if (tab === 'users') fetchUsers() }, [tab, page, search])
-
-  const fetchData = async () => {
-    setLoading(true)
+  const loadUsers = useCallback(async () => {
     try {
-      const [s, u] = await Promise.all([
-        api.get('/admin/stats').catch(() => ({ data: null })),
-        api.get('/admin/users?page=1&limit=10').catch(() => ({ data: { users: [], total: 0 } })),
-      ])
-      setStats(s.data)
-      setUsers(u.data.users || [])
-      setTotal(u.data.total || 0)
-    } finally { setLoading(false) }
+      const { data } = await api.get('/admin/users', { params: { page, limit: PAGE, search: query || undefined } })
+      setUsers(data.users || []); setTotal(data.total || 0)
+    } catch (e) { setError(errorMessage(e)) }
+  }, [page, query])
+
+  const loadLogs = useCallback(async () => {
+    try {
+      const { data } = await api.get('/admin/audit-logs', { params: { severity: logSev || undefined } })
+      setLogs(data.logs || [])
+    } catch (e) { setError(errorMessage(e)) }
+  }, [logSev])
+
+  useEffect(() => { Promise.all([loadStats(), loadUsers()]).finally(() => setLoading(false)) }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { loadUsers() }, [loadUsers])
+  useEffect(() => { if (tab === 'security') loadLogs() }, [tab, loadLogs])
+  useEffect(() => { const t = setTimeout(() => { setQuery(search.trim()); setPage(1) }, 350); return () => clearTimeout(t) }, [search])
+
+  const toggleAdmin = async (u: UserRow) => {
+    if (!confirm(`${u.isAdmin ? 'Remove admin rights from' : 'Grant admin rights to'} ${u.username}?`)) return
+    try {
+      const { data } = await api.put(`/admin/user/${u._id}/admin`)
+      setUsers(us => us.map(x => (x._id === u._id ? { ...x, isAdmin: data.isAdmin } : x)))
+      loadStats()
+    } catch (e) { alert(errorMessage(e)) }
   }
 
-  const fetchUsers = async () => {
+  const deleteUser = async (u: UserRow) => {
+    if (!confirm(`Permanently delete ${u.username} and all of their data?`)) return
     try {
-      const { data } = await api.get('/admin/users', { params: { page, limit: 15, search: search || undefined } })
-      setUsers(data.users || [])
-      setTotal(data.total || 0)
-    } catch (e) { console.error(e) }
+      await api.delete(`/admin/user/${u._id}`)
+      loadUsers(); loadStats()
+    } catch (e) { alert(errorMessage(e)) }
   }
 
-  const toggleAdmin = async (userId: string, current: boolean) => {
-    try {
-      await api.put(`/admin/users/${userId}`, { isAdmin: !current })
-      setUsers(us => us.map(u => u._id === userId ? { ...u, isAdmin: !current } : u))
-    } catch (e) { console.error(e) }
+  const unblock = async (ip: string) => {
+    try { await api.post('/admin/unblock-ip', { ip }); loadStats() } catch (e) { alert(errorMessage(e)) }
   }
 
-  const deleteUser = async (userId: string) => {
-    if (!confirm('Delete this user permanently?')) return
-    try {
-      await api.delete(`/admin/users/${userId}`)
-      setUsers(us => us.filter(u => u._id !== userId))
-      setTotal(t => t - 1)
-    } catch (e) { console.error(e) }
-  }
-
-  if (!user?.isAdmin) return null
-
-  const STAT_CARDS = stats ? [
-    { label: 'Total Users',     value: stats.totalUsers?.toLocaleString()    || '—', icon: '👥', color: 'text-brand' },
-    { label: 'New Today',       value: stats.newUsersToday?.toLocaleString() || '—', icon: '✨', color: 'text-emerald-400' },
-    { label: 'Active Users',    value: stats.activeUsers?.toLocaleString()   || '—', icon: '🔥', color: 'text-orange-400' },
-    { label: 'Watchlist Items', value: stats.totalWatchlist?.toLocaleString()|| '—', icon: '🔖', color: 'text-purple-400' },
+  const cards = stats ? [
+    { label: 'Total users',  value: stats.totalUsers,     icon: 'group',             tone: 'text-brand' },
+    { label: 'New today',    value: stats.newUsersToday,  icon: 'person_add',        tone: 'text-cyan' },
+    { label: 'Active (7d)',  value: stats.activeUsers,    icon: 'play_circle',       tone: 'text-gold' },
+    { label: 'List items',   value: stats.totalWatchlist, icon: 'bookmark',          tone: 'text-ink' },
+    { label: 'Admins',       value: stats.adminUsers,     icon: 'shield_person',     tone: 'text-ink' },
+    { label: 'Locked',       value: stats.lockedAccounts, icon: 'lock_clock',        tone: stats.lockedAccounts ? 'text-brand-soft' : 'text-ink' },
   ] : []
 
-  const TABS: { key: Tab; label: string; icon: string }[] = [
-    { key: 'overview', label: 'Overview', icon: '📊' },
-    { key: 'users',    label: 'Users',    icon: '👥' },
-    { key: 'security', label: 'Security', icon: '🛡' },
-  ]
+  const pages = Math.max(1, Math.ceil(total / PAGE))
+  const isLocked = (u: UserRow) => !!u.lockUntil && new Date(u.lockUntil).getTime() > Date.now()
 
   return (
-    <div className="pt-16 min-h-screen px-3 sm:px-6 py-6">
+    <div className="pt-24 min-h-screen px-4 sm:px-6 lg:px-12 pb-16">
       <div className="max-w-6xl mx-auto">
-
-        {/* Header */}
-        <div className="flex items-center justify-between mb-7">
+        <div className="flex items-end justify-between gap-4 mb-6">
           <div>
-            <p className="text-[10px] font-bold uppercase tracking-widest text-brand mb-1">Admin Panel</p>
-            <h1 className="text-2xl sm:text-3xl font-bold text-white" style={{ fontFamily:'Syne, sans-serif' }}>
-              Dashboard
-            </h1>
+            <p className="text-label-sm uppercase text-brand-soft mb-1">Admin console</p>
+            <h1 className="text-3xl font-extrabold text-white tracking-tight">Dashboard</h1>
           </div>
-          <button onClick={() => navigate('/')} className="btn-ghost text-sm">
-            ← Back to Site
-          </button>
         </div>
 
-        {/* Tabs */}
-        <div className="flex gap-1 bg-dark-surface border border-dark-border rounded-xl p-1 w-fit mb-7">
-          {TABS.map(t => (
-            <button key={t.key} onClick={() => setTab(t.key)}
-              className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold transition-all ${
-                tab === t.key ? 'bg-brand text-dark' : 'text-slate-400 hover:text-white'
-              }`}>
-              <span>{t.icon}</span>{t.label}
+        <div className="flex gap-1 p-1 rounded-full bg-dark-card w-fit max-w-full overflow-x-auto scrollbar-hide mb-6" role="tablist">
+          {([['overview', 'monitoring', 'Overview'], ['users', 'group', 'Users'], ['library', 'video_library', 'Library'], ['official', 'smart_display', 'Official anime'], ['collections', 'collections_bookmark', 'Collections'], ['reports', 'flag', 'Reports'], ['announcements', 'campaign', 'Announcements'], ['settings', 'tune', 'Settings'], ['security', 'shield', 'Security']] as const).map(([k, icon, label]) => (
+            <button key={k} role="tab" aria-selected={tab === k} onClick={() => setTab(k)}
+              className={`h-10 px-4 rounded-full text-sm font-bold flex items-center gap-1.5 transition-all ${tab === k ? 'bg-brand text-white shadow-brand-sm' : 'text-ink-muted hover:text-white'}`}>
+              <Icon name={icon} size={18} />{label}
             </button>
           ))}
         </div>
 
-        {/* ── Overview ── */}
+        {error && <div className="rounded-xl px-4 py-3 mb-4 text-sm bg-brand/10 text-brand-soft">{error}</div>}
+
         {tab === 'overview' && (
           <div className="animate-fade-in">
-            {loading ? (
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-8">
-                {Array(4).fill(0).map((_,i) => <div key={i} className="skeleton rounded-2xl h-28" />)}
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+            {loading ? Array.from({ length: 6 }).map((_, i) => <div key={i} className="skeleton h-28" />) : cards.map(c => (
+              <div key={c.label} className="card p-5">
+                <Icon name={c.icon} size={22} className={c.tone} />
+                <p className="text-3xl font-extrabold text-white mt-2 tabular-nums">{c.value.toLocaleString()}</p>
+                <p className="text-label-sm uppercase text-ink-faint">{c.label}</p>
               </div>
-            ) : (
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-8">
-                {STAT_CARDS.map(s => (
-                  <div key={s.label} className="card p-5">
-                    <div className="text-2xl mb-2">{s.icon}</div>
-                    <div className={`text-2xl sm:text-3xl font-bold mb-0.5 ${s.color}`} style={{ fontFamily:'Syne, sans-serif' }}>{s.value}</div>
-                    <div className="text-xs text-slate-500">{s.label}</div>
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {/* Recent users preview */}
-            <div className="card overflow-hidden">
-              <div className="flex items-center justify-between px-5 py-4 border-b border-dark-border">
-                <h3 className="text-sm font-bold text-white" style={{ fontFamily:'Syne, sans-serif' }}>Recent Users</h3>
-                <button onClick={() => setTab('users')} className="text-xs text-brand hover:underline">View all</button>
-              </div>
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b border-dark-border">
-                      <th className="text-left px-5 py-3 text-[11px] font-bold uppercase tracking-wider text-slate-600">User</th>
-                      <th className="text-left px-5 py-3 text-[11px] font-bold uppercase tracking-wider text-slate-600 hidden sm:table-cell">Email</th>
-                      <th className="text-left px-5 py-3 text-[11px] font-bold uppercase tracking-wider text-slate-600 hidden md:table-cell">Joined</th>
-                      <th className="text-left px-5 py-3 text-[11px] font-bold uppercase tracking-wider text-slate-600">Role</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {users.slice(0,5).map((u, i) => (
-                      <tr key={u._id} className={`border-b border-dark-border/40 hover:bg-dark-hover transition-colors ${i % 2 === 0 ? '' : 'bg-dark-surface/30'}`}>
-                        <td className="px-5 py-3.5">
-                          <div className="flex items-center gap-3">
-                            <div className="w-8 h-8 rounded-full bg-brand/15 flex items-center justify-center text-brand text-sm font-bold flex-shrink-0">
-                              {u.username[0].toUpperCase()}
-                            </div>
-                            <span className="font-medium text-white text-sm">{u.username}</span>
-                          </div>
-                        </td>
-                        <td className="px-5 py-3.5 text-slate-400 text-xs hidden sm:table-cell">{u.email}</td>
-                        <td className="px-5 py-3.5 text-slate-500 text-xs hidden md:table-cell">
-                          {new Date(u.createdAt).toLocaleDateString()}
-                        </td>
-                        <td className="px-5 py-3.5">
-                          <span className={`badge text-[10px] ${u.isAdmin ? 'badge-brand' : 'bg-dark-surface border border-dark-border text-slate-500'}`}>
-                            {u.isAdmin ? '👑 Admin' : 'User'}
-                          </span>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
+            ))}
+          </div>
+          <Analytics />
           </div>
         )}
 
-        {/* ── Users ── */}
         {tab === 'users' && (
           <div className="animate-fade-in">
-            {/* Search + count */}
-            <div className="flex flex-col sm:flex-row sm:items-center gap-3 mb-5">
-              <div className="flex items-center gap-2.5 bg-dark-surface border border-dark-border rounded-xl px-4 py-2.5 flex-1 max-w-sm focus-within:border-brand/40 transition-colors">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-slate-500 flex-shrink-0">
-                  <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
-                </svg>
-                <input value={search} onChange={e => { setSearch(e.target.value); setPage(1) }}
-                  placeholder="Search users…"
-                  className="bg-transparent outline-none text-sm text-white placeholder-slate-500 flex-1" />
-                {search && <button onClick={() => { setSearch(''); setPage(1) }} className="text-slate-500 hover:text-white text-xs">✕</button>}
+            <div className="flex flex-col sm:flex-row sm:items-center gap-3 mb-4">
+              <div className="relative flex-1 max-w-sm">
+                <Icon name="search" size={20} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-ink-faint" />
+                <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search username or email" className="input pl-11 h-11" />
               </div>
-              <span className="text-xs text-slate-600 sm:ml-auto">{total.toLocaleString()} users total</span>
+              <span className="text-xs text-ink-faint sm:ml-auto">{total.toLocaleString()} users</span>
             </div>
 
             <div className="card overflow-hidden">
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
-                    <tr className="border-b border-dark-border bg-dark-surface">
-                      {['User', 'Email', 'Joined', 'Role', 'Actions'].map(h => (
-                        <th key={h} className="text-left px-5 py-3 text-[11px] font-bold uppercase tracking-wider text-slate-600 whitespace-nowrap">
-                          {h}
-                        </th>
-                      ))}
+                    <tr className="bg-dark-surface text-left">
+                      {['User', 'Email', 'Joined', 'Last active', 'Role', ''].map(h => <th key={h} className="px-4 py-3 text-label-sm uppercase text-ink-faint whitespace-nowrap">{h}</th>)}
                     </tr>
                   </thead>
                   <tbody>
-                    {users.map((u, i) => (
-                      <tr key={u._id} className={`border-b border-dark-border/40 hover:bg-dark-hover transition-colors ${i % 2 === 0 ? '' : 'bg-dark-surface/20'}`}>
-                        <td className="px-5 py-3.5">
+                    {users.map(u => (
+                      <tr key={u._id} className="border-t border-white/[0.05] hover:bg-white/[0.02]">
+                        <td className="px-4 py-3">
                           <div className="flex items-center gap-3">
-                            <div className="w-7 h-7 rounded-full bg-brand/15 flex items-center justify-center text-brand text-xs font-bold flex-shrink-0">
-                              {u.username[0].toUpperCase()}
-                            </div>
-                            <span className="font-medium text-white">{u.username}</span>
+                            <span className="w-8 h-8 rounded-full bg-brand/15 text-brand-soft flex items-center justify-center font-bold flex-shrink-0">{u.username[0]?.toUpperCase()}</span>
+                            <button onClick={() => setOpenUser(u._id)} className="font-semibold text-white hover:underline text-left">{u.username}</button>
+                            {isLocked(u) && <span className="tech-pill text-gold">Locked</span>}
+                            {u.suspended && <span className="tech-pill text-brand-soft">Suspended</span>}
+                            {u.emailVerified === false && <span className="tech-pill text-ink-muted" title="Hasn't entered the code from their email yet">Unconfirmed</span>}
                           </div>
                         </td>
-                        <td className="px-5 py-3.5 text-slate-400 text-xs">{u.email}</td>
-                        <td className="px-5 py-3.5 text-slate-500 text-xs whitespace-nowrap">
-                          {new Date(u.createdAt).toLocaleDateString()}
-                        </td>
-                        <td className="px-5 py-3.5">
-                          <span className={`badge text-[10px] ${u.isAdmin ? 'badge-brand' : 'bg-dark-surface border border-dark-border text-slate-500'}`}>
-                            {u.isAdmin ? '👑 Admin' : 'User'}
-                          </span>
-                        </td>
-                        <td className="px-5 py-3.5">
-                          <div className="flex items-center gap-2">
-                            <button onClick={() => toggleAdmin(u._id, u.isAdmin)}
-                              className="text-[10px] px-2.5 py-1 rounded-lg border border-dark-border text-slate-400 hover:border-brand/40 hover:text-white transition-colors whitespace-nowrap">
-                              {u.isAdmin ? 'Remove Admin' : 'Make Admin'}
-                            </button>
-                            {u._id !== user?._id && (
-                              <button onClick={() => deleteUser(u._id)}
-                                className="text-[10px] px-2.5 py-1 rounded-lg border border-red-500/20 text-red-400 hover:bg-red-500/10 transition-colors">
-                                Delete
-                              </button>
-                            )}
+                        <td className="px-4 py-3 text-ink-muted text-xs">{u.email}</td>
+                        <td className="px-4 py-3 text-ink-faint text-xs whitespace-nowrap">{new Date(u.createdAt).toLocaleDateString()}</td>
+                        <td className="px-4 py-3 text-ink-faint text-xs whitespace-nowrap">{u.lastActiveAt ? new Date(u.lastActiveAt).toLocaleDateString() : '—'}</td>
+                        <td className="px-4 py-3">{u.isAdmin ? <span className="tech-pill text-gold">Admin</span> : <span className="tech-pill text-ink-muted">User</span>}</td>
+                        <td className="px-4 py-3">
+                          <div className="flex items-center gap-1.5 justify-end">
+                            <button onClick={() => setOpenUser(u._id)} className="btn-secondary px-3 py-1 text-xs">Details</button>
+                          {u._id !== me?._id && (
+                            <>
+                              <button onClick={() => toggleAdmin(u)} className="btn-secondary px-3 py-1 text-xs whitespace-nowrap">{u.isAdmin ? 'Revoke admin' : 'Make admin'}</button>
+                              {!u.isAdmin && (
+                                <button onClick={() => deleteUser(u)} aria-label={`Delete ${u.username}`} className="w-8 h-8 rounded-full flex items-center justify-center text-ink-faint hover:text-brand-soft hover:bg-brand/10">
+                                  <Icon name="delete" size={18} />
+                                </button>
+                              )}
+                            </>
+                          )}
                           </div>
                         </td>
                       </tr>
                     ))}
+                    {!users.length && <tr><td colSpan={6} className="px-4 py-10 text-center text-ink-faint">No users found</td></tr>}
                   </tbody>
                 </table>
               </div>
-
-              {/* Pagination */}
-              {total > 15 && (
-                <div className="flex items-center justify-between px-5 py-4 border-t border-dark-border">
-                  <span className="text-xs text-slate-600">Page {page} of {Math.ceil(total/15)}</span>
+              {pages > 1 && (
+                <div className="flex items-center justify-between px-4 py-3 border-t border-white/[0.05]">
+                  <span className="text-xs text-ink-faint">Page {page} of {pages}</span>
                   <div className="flex gap-2">
-                    <button disabled={page === 1} onClick={() => setPage(p => p-1)}
-                      className="btn-secondary px-3 py-1.5 text-xs disabled:opacity-40">← Prev</button>
-                    <button disabled={page >= Math.ceil(total/15)} onClick={() => setPage(p => p+1)}
-                      className="btn-secondary px-3 py-1.5 text-xs disabled:opacity-40">Next →</button>
+                    <button disabled={page === 1} onClick={() => setPage(p => p - 1)} className="btn-secondary px-3 py-1.5 text-xs disabled:opacity-40">Prev</button>
+                    <button disabled={page >= pages} onClick={() => setPage(p => p + 1)} className="btn-secondary px-3 py-1.5 text-xs disabled:opacity-40">Next</button>
                   </div>
                 </div>
               )}
@@ -271,56 +198,58 @@ export default function AdminDashboard() {
           </div>
         )}
 
-        {/* ── Security ── */}
-        {tab === 'security' && (
-          <div className="animate-fade-in space-y-4">
-            <div className="card p-6">
-              <h3 className="text-sm font-bold text-white mb-4" style={{ fontFamily:'Syne, sans-serif' }}>
-                🛡 Security Overview
-              </h3>
-              <div className="grid sm:grid-cols-2 gap-4">
-                {[
-                  { label: 'Rate Limiting',      status: 'Active',   desc: '300 req/15min general, 10 req/15min auth' },
-                  { label: 'JWT Authentication', status: 'Active',   desc: '64-byte secret, token expiry enabled' },
-                  { label: 'XSS Protection',     status: 'Active',   desc: 'xss-clean middleware enabled' },
-                  { label: 'NoSQL Injection',     status: 'Active',   desc: 'express-mongo-sanitize enabled' },
-                  { label: 'CORS Policy',         status: 'Active',   desc: 'Restricted to streammix.netlify.app' },
-                  { label: 'HTTP Headers',        status: 'Active',   desc: 'Helmet.js security headers' },
-                ].map(s => (
-                  <div key={s.label} className="flex items-start gap-3 p-4 bg-dark-surface rounded-xl border border-dark-border">
-                    <div className="w-2 h-2 rounded-full bg-emerald-400 mt-1.5 flex-shrink-0 shadow-[0_0_8px_rgba(52,211,153,0.5)]" />
-                    <div>
-                      <p className="text-sm font-semibold text-white">{s.label}</p>
-                      <p className="text-[11px] text-emerald-400 font-medium mb-0.5">{s.status}</p>
-                      <p className="text-[11px] text-slate-500">{s.desc}</p>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
+        {tab === 'library' && <LibraryImport />}
+        {tab === 'official' && <OfficialAnime />}
+        {tab === 'collections' && <Collections />}
+        {tab === 'reports' && <Reports />}
+        {tab === 'settings' && <AppSettings />}
 
-            {/* Locked accounts */}
-            {users.filter(u => u.loginAttempts >= 5).length > 0 && (
-              <div className="card p-6">
-                <h3 className="text-sm font-bold text-white mb-4 flex items-center gap-2">
-                  <span className="text-red-400">⚠</span> Suspicious Activity
-                </h3>
+        {tab === 'announcements' && <Announcements />}
+
+        {openUser && (
+          <UserDetailModal userId={openUser} isSelf={openUser === me?._id}
+            onClose={() => setOpenUser(null)} onChanged={() => { loadUsers(); loadStats() }} />
+        )}
+
+        {tab === 'security' && (
+          <div className="space-y-6 animate-fade-in">
+            {stats && stats.blockedIPs.length > 0 && (
+              <section className="card p-5">
+                <h2 className="text-label-sm uppercase text-ink-faint mb-3">Blocked IPs</h2>
                 <div className="space-y-2">
-                  {users.filter(u => u.loginAttempts >= 5).map(u => (
-                    <div key={u._id} className="flex items-center justify-between p-3 bg-red-500/5 border border-red-500/20 rounded-xl">
-                      <div>
-                        <p className="text-sm font-medium text-white">{u.username}</p>
-                        <p className="text-xs text-red-400">{u.loginAttempts} failed login attempts</p>
-                      </div>
-                      <button onClick={() => deleteUser(u._id)}
-                        className="text-xs px-3 py-1.5 rounded-lg bg-red-500/10 border border-red-500/30 text-red-400 hover:bg-red-500/20 transition-colors">
-                        Remove
-                      </button>
+                  {stats.blockedIPs.map(b => (
+                    <div key={b.ip} className="flex items-center gap-3 rounded-xl bg-dark-surface px-3 py-2">
+                      <span className="font-mono text-sm text-white">{b.ip}</span>
+                      <span className="text-xs text-ink-faint flex-1 truncate">{b.reason} · {b.expiresIn}</span>
+                      <button onClick={() => unblock(b.ip)} className="btn-secondary px-3 py-1 text-xs">Unblock</button>
                     </div>
                   ))}
                 </div>
-              </div>
+              </section>
             )}
+
+            <section className="card overflow-hidden">
+              <div className="flex items-center justify-between gap-3 px-5 py-4">
+                <h2 className="text-label-sm uppercase text-ink-faint">Audit log</h2>
+                <select value={logSev} onChange={e => setLogSev(e.target.value as any)} aria-label="Severity"
+                  className="h-9 px-3 rounded-full bg-dark-border text-ink text-xs font-bold outline-none">
+                  <option value="">All events</option><option value="warn">Warnings</option><option value="critical">Critical</option>
+                </select>
+              </div>
+              <div className="divide-y divide-white/[0.05] max-h-[560px] overflow-y-auto">
+                {logs.map(l => (
+                  <div key={l._id} className="px-5 py-3 flex items-start gap-3">
+                    <Icon name={l.severity === 'critical' ? 'gpp_bad' : l.severity === 'warn' ? 'warning' : 'info'} size={18} className={`${SEVERITY[l.severity]} mt-0.5`} />
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-bold text-white">{l.action.replace(/_/g, ' ').toLowerCase()}</p>
+                      <p className="text-xs text-ink-faint truncate">{[l.email, l.ip, l.details?.path].filter(Boolean).join(' · ')}</p>
+                    </div>
+                    <span className="text-xs text-ink-faint whitespace-nowrap">{new Date(l.createdAt).toLocaleString()}</span>
+                  </div>
+                ))}
+                {!logs.length && <p className="px-5 py-10 text-center text-ink-faint text-sm">No events</p>}
+              </div>
+            </section>
           </div>
         )}
       </div>

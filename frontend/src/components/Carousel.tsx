@@ -1,31 +1,51 @@
-// frontend/src/components/Carousel.tsx
-import { useRef, useState, useCallback } from 'react'
+// frontend/src/components/Carousel.tsx — horizontal media rail
+import { useRef, useState, useCallback, useEffect } from 'react'
+import { track } from '../utils/track'
 import { useNavigate } from 'react-router-dom'
-import { Movie } from '../types'
-
-const IMG = 'https://image.tmdb.org/t/p/w300'
-const FALLBACK = 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMzAwIiBoZWlnaHQ9IjQ1MCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cmVjdCB3aWR0aD0iMzAwIiBoZWlnaHQ9IjQ1MCIgZmlsbD0iIzEzMTYxZiIvPjx0ZXh0IHg9IjUwJSIgeT0iNTAlIiBkb21pbmFudC1iYXNlbGluZT0ibWlkZGxlIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmb250LXNpemU9IjU2IiBmaWxsPSIjMWUyMjM1Ij7wn46cPC90ZXh0Pjwvc3ZnPg=='
+import MovieCard, { CardMovie, mediaTypeOf } from './MovieCard'
+import { useHidden } from '../stores/profileStore'
+import Icon from './Icon'
 
 interface Props {
   title:    string
-  movies:   Movie[]
+  movies:   CardMovie[]
   loading?: boolean
   seeAll?:  string
+  icon?:    string
+  accent?:  'brand' | 'gold' | 'cyan'
+  ranked?:  boolean
+  /** Recommendation row kind: clicks are reported so the server learns which rows this profile uses */
+  trackRow?: string
 }
 
-function SkeletonCard() {
+const ACCENT = {
+  brand: 'bg-brand shadow-[0_0_8px_#e50914]',
+  gold:  'bg-gold shadow-[0_0_8px_#f59e0b]',
+  cyan:  'bg-cyan shadow-[0_0_8px_#4cd7f6]',
+}
+
+export function RailHeader({ title, icon, accent = 'brand', right }: { title: string; icon?: string; accent?: keyof typeof ACCENT; right?: React.ReactNode }) {
   return (
-    <div className="flex-shrink-0 w-28 sm:w-36" style={{ aspectRatio: '2/3' }}>
-      <div className="w-full h-full skeleton rounded-xl" />
+    <div className="flex items-center justify-between px-4 sm:px-6 lg:px-12 mb-3">
+      <div className="flex items-center gap-2 min-w-0">
+        {icon
+          ? <Icon name={icon} size={20} className={accent === 'gold' ? 'text-gold' : accent === 'cyan' ? 'text-cyan' : 'text-brand'} fill />
+          : <span className={`w-1.5 h-4 rounded-full ${ACCENT[accent]}`} />}
+        <h2 className="section-title truncate">{title}</h2>
+      </div>
+      {right}
     </div>
   )
 }
 
-export default function Carousel({ title, movies, loading, seeAll }: Props) {
+export default function Carousel({ title, movies: all, loading, seeAll, icon, accent = 'brand', ranked, trackRow }: Props) {
   const navigate = useNavigate()
+  // Titles the profile marked "Not for me" never show up in rows
+  const hidden = useHidden()
+  const movies = hidden.size ? all.filter(m => !hidden.has(`${mediaTypeOf(m)}:${m.id}`)) : all
   const scrollRef = useRef<HTMLDivElement>(null)
-  const [canLeft, setCanLeft] = useState(false)
-  const [canRight, setCanRight] = useState(true)
+  const [canLeft,  setCanLeft]  = useState(false)
+  const [canRight, setCanRight] = useState(false)
 
   const updateArrows = useCallback(() => {
     const el = scrollRef.current
@@ -34,22 +54,22 @@ export default function Carousel({ title, movies, loading, seeAll }: Props) {
     setCanRight(el.scrollLeft + el.clientWidth < el.scrollWidth - 10)
   }, [])
 
+  useEffect(() => { updateArrows() }, [movies.length, updateArrows])
+
   const scroll = (dir: 'left' | 'right') => {
     const el = scrollRef.current
     if (!el) return
-    const amount = el.clientWidth * 0.75
-    el.scrollBy({ left: dir === 'left' ? -amount : amount, behavior: 'smooth' })
-    setTimeout(updateArrows, 300)
+    el.scrollBy({ left: (dir === 'left' ? -1 : 1) * el.clientWidth * 0.8, behavior: 'smooth' })
   }
 
   if (loading) {
     return (
-      <section className="mb-6 sm:mb-8">
-        <div className="flex items-center justify-between px-3 sm:px-6 mb-3">
-          <div className="h-5 w-40 skeleton rounded" />
-        </div>
-        <div className="flex gap-2 sm:gap-3 overflow-hidden px-3 sm:px-6">
-          {Array(7).fill(0).map((_, i) => <SkeletonCard key={i} />)}
+      <section className="mb-8 sm:mb-10">
+        <div className="px-4 sm:px-6 lg:px-12 mb-3"><div className="h-5 w-44 skeleton rounded-full" /></div>
+        <div className="flex gap-3 overflow-hidden px-4 sm:px-6 lg:px-12">
+          {Array.from({ length: 8 }).map((_, i) => (
+            <div key={i} className="flex-shrink-0 w-36 sm:w-44 skeleton" style={{ aspectRatio: '2/3.6' }} />
+          ))}
         </div>
       </section>
     )
@@ -58,113 +78,38 @@ export default function Carousel({ title, movies, loading, seeAll }: Props) {
   if (!movies.length) return null
 
   return (
-    <section className="mb-6 sm:mb-8 relative group/section">
-      {/* Header */}
-      <div className="flex items-center justify-between px-3 sm:px-6 mb-3 sm:mb-4">
-        <h2 className="section-title">{title}</h2>
-        {seeAll && (
-          <button
-            onClick={() => navigate(seeAll)}
-            className="text-xs text-slate-500 hover:text-brand transition-colors font-medium"
-          >
-            See all →
-          </button>
-        )}
-      </div>
+    <section className="mb-8 sm:mb-10 relative group/section">
+      <RailHeader title={title} icon={icon} accent={accent} right={seeAll && (
+        <button onClick={() => navigate(seeAll)} className="text-label-sm uppercase text-brand-soft hover:text-white transition-colors">
+          View all
+        </button>
+      )} />
 
-      {/* Scroll container */}
       <div className="relative">
-        {/* Left arrow */}
-        <button
-          onClick={() => scroll('left')}
-          disabled={!canLeft}
-          className={`carousel-btn left-2 ${!canLeft ? 'opacity-0 pointer-events-none' : 'group-hover/section:opacity-100'}`}
-        >
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-            <path d="m15 18-6-6 6-6" />
-          </svg>
+        <button onClick={() => scroll('left')} aria-label="Scroll left"
+          className={`carousel-btn left-3 hidden sm:flex ${canLeft ? 'group-hover/section:opacity-100' : 'pointer-events-none'}`}>
+          <Icon name="chevron_left" size={24} />
+        </button>
+        <button onClick={() => scroll('right')} aria-label="Scroll right"
+          className={`carousel-btn right-3 hidden sm:flex ${canRight ? 'group-hover/section:opacity-100' : 'pointer-events-none'}`}>
+          <Icon name="chevron_right" size={24} />
         </button>
 
-        {/* Right arrow */}
-        <button
-          onClick={() => scroll('right')}
-          disabled={!canRight}
-          className={`carousel-btn right-2 ${!canRight ? 'opacity-0 pointer-events-none' : 'group-hover/section:opacity-100'}`}
-        >
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-            <path d="m9 18 6-6-6-6" />
-          </svg>
-        </button>
-
-        {/* Cards - FIXED with touch-action */}
-        <div
-          ref={scrollRef}
-          onScroll={updateArrows}
-          className="flex gap-2 sm:gap-3 overflow-x-auto scrollbar-hide px-3 sm:px-6 pb-1 touch-pan-y"
-          style={{ touchAction: 'pan-y' }}   // Primary fix: allows vertical scroll, smooth horizontal drag
-        >
-          {movies.map((movie) => (
-            <CarouselCard key={movie.id} movie={movie} />
+        <div ref={scrollRef} onScroll={updateArrows}
+          className="flex gap-3 sm:gap-4 overflow-x-auto scrollbar-hide px-4 sm:px-6 lg:px-12 pb-2 snap-x">
+          {movies.map((movie, i) => (
+            <div key={`${movie.media_type || ''}-${movie.id}`}
+              onClickCapture={trackRow ? () => track('detail', mediaTypeOf(movie), movie.id, { row: trackRow, source: 'home' }) : undefined}
+              className={`relative flex-shrink-0 snap-start ${ranked ? 'w-44 sm:w-52 pl-10 sm:pl-12 flex items-end' : 'w-36 sm:w-44'}`}>
+              {ranked && (
+                <span className="absolute left-0 bottom-14 text-[72px] sm:text-[88px] font-extrabold leading-none text-dark-high select-none pointer-events-none"
+                  style={{ WebkitTextStroke: '1px rgba(255,255,255,0.12)' }}>{i + 1}</span>
+              )}
+              <div className="relative w-full"><MovieCard movie={movie} /></div>
+            </div>
           ))}
         </div>
       </div>
     </section>
-  )
-}
-
-function CarouselCard({ movie }: { movie: Movie }) {
-  const navigate = useNavigate()
-  const [imgErr, setImgErr] = useState(false)
-
-  const title = movie.title || movie.name || ''
-  const yr = (movie.release_date || movie.first_air_date || '').slice(0, 4)
-  const rt = movie.vote_average || 0
-  const isTV = !!movie.name && !movie.title
-  const type = isTV ? 'tv' : 'movie'
-
-  const goDetail = () => navigate(type === 'tv' ? `/tv/${movie.id}` : `/movie/${movie.id}`)
-  const goPlay = (e: React.MouseEvent) => {
-    e.stopPropagation()
-    navigate(type === 'tv' ? `/player/tv/${movie.id}?season=1&episode=1` : `/player/movie/${movie.id}`)
-  }
-
-  return (
-    <div
-      onClick={goDetail}
-      className="flex-shrink-0 w-28 sm:w-36 cursor-pointer group"
-      style={{ aspectRatio: '2/3' }}
-    >
-      <div className="relative w-full h-full rounded-xl overflow-hidden bg-dark-card">
-        <img
-          src={!imgErr && movie.poster_path ? IMG + movie.poster_path : FALLBACK}
-          alt={title}
-          className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
-          loading="lazy"
-          onError={() => setImgErr(true)}
-        />
-
-        {/* Overlay */}
-        <div className="absolute inset-0 bg-gradient-to-t from-[#07080c]/95 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
-
-        {/* Rating badge */}
-        {rt >= 7.5 && (
-          <div className="absolute top-1.5 left-1.5 badge-gold text-[10px] px-1.5 py-0.5">
-            ★ {rt.toFixed(1)}
-          </div>
-        )}
-
-        {/* Bottom on hover */}
-        <div className="absolute bottom-0 left-0 right-0 p-2 translate-y-full group-hover:translate-y-0 transition-transform duration-300">
-          <p className="text-white text-[11px] font-semibold leading-tight mb-1.5 line-clamp-2">{title}</p>
-          {yr && <p className="text-slate-400 text-[10px] mb-1.5">{yr}</p>}
-          <button
-            onClick={goPlay}
-            className="w-full bg-brand text-dark text-[10px] font-bold py-1.5 rounded-lg hover:bg-brand-light transition-colors active:scale-95"
-          >
-            ▶ Play
-          </button>
-        </div>
-      </div>
-    </div>
   )
 }

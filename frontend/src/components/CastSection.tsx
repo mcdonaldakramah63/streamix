@@ -43,7 +43,7 @@ export default function CastSection({ cast, loading }: Props) {
     <div>
       <div className="flex items-center justify-between mb-4">
         <h3 className="section-title">Cast</h3>
-        <span className="text-xs text-slate-600">{cast.length} actors</span>
+        <span className="text-xs text-ink-faint">{cast.length} actors</span>
       </div>
 
       <div className="flex gap-3 sm:gap-4 overflow-x-auto scrollbar-hide pb-2 -mx-3 px-3 sm:-mx-6 sm:px-6">
@@ -66,10 +66,10 @@ export default function CastSection({ cast, loading }: Props) {
               <div className="absolute inset-0 bg-brand/20 opacity-0 group-hover:opacity-100 transition-opacity" />
             </div>
 
-            <p className="text-xs font-semibold text-slate-200 truncate group-hover:text-brand transition-colors">
+            <p className="text-xs font-semibold text-ink truncate group-hover:text-brand transition-colors">
               {member.name}
             </p>
-            <p className="text-[10px] text-slate-600 truncate mt-0.5">
+            <p className="text-[10px] text-ink-faint truncate mt-0.5">
               {member.character}
             </p>
           </button>

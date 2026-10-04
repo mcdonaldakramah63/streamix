@@ -1,6 +1,6 @@
-// frontend/src/context/authStore.ts — FULL REPLACEMENT
+// frontend/src/context/authStore.ts — single source of truth for the logged-in user
+// Side effects of logging in/out (syncing watchlist, profiles, etc.) live in services/session.ts
 import { create } from 'zustand'
-import { useContinueWatching } from '../stores/continueWatchingStore'
 
 export interface User {
   _id:      string
@@ -12,9 +12,10 @@ export interface User {
 }
 
 interface AuthStore {
-  user:    User | null
-  setUser: (user: User | null) => void
-  logout:  () => void
+  user:     User | null
+  setUser:  (user: User | null) => void
+  setToken: (token: string) => void
+  logout:   () => void
 }
 
 const LS_USER = 'streamix_user'
@@ -24,44 +25,38 @@ function loadUser(): User | null {
     const raw = localStorage.getItem(LS_USER)
     if (!raw) return null
     const u = JSON.parse(raw)
-    if (!u?.token) return null
-    // Check token expiry
-    try {
-      const payload = JSON.parse(atob(u.token.split('.')[1]))
-      if (payload.exp && payload.exp * 1000 < Date.now()) {
-        localStorage.removeItem(LS_USER)
-        return null
-      }
-    } catch { /* non-standard token, keep it */ }
-    return u
+    // An expired access token is fine here — the API client refreshes it using the HttpOnly cookie
+    return u?._id && u?.token ? u : null
   } catch { return null }
 }
 
-export const useAuthStore = create<AuthStore>((set) => ({
+function persist(user: User | null) {
+  try {
+    if (user) localStorage.setItem(LS_USER, JSON.stringify(user))
+    else localStorage.removeItem(LS_USER)
+  } catch { /* storage unavailable */ }
+}
+
+export function isTokenExpired(token: string | undefined, bufferMs = 30_000): boolean {
+  if (!token) return true
+  try {
+    const payload = JSON.parse(atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')))
+    return !payload.exp || payload.exp * 1000 < Date.now() + bufferMs
+  } catch { return true }
+}
+
+export const useAuthStore = create<AuthStore>((set, get) => ({
   user: loadUser(),
 
-  setUser: (user) => {
-    if (user) {
-      try { localStorage.setItem(LS_USER, JSON.stringify(user)) } catch {}
-      set({ user })
-      // Fetch this user's continue watching from backend
-      // Small delay so the token is available in localStorage before the request fires
-      setTimeout(() => useContinueWatching.getState().fetch(), 200)
-    } else {
-      try { localStorage.removeItem(LS_USER) } catch {}
-      set({ user: null })
-    }
+  setUser: (user) => { persist(user); set({ user }) },
+
+  setToken: (token) => {
+    const user = get().user
+    if (!user) return
+    const next = { ...user, token }
+    persist(next)
+    set({ user: next })
   },
 
-  logout: () => {
-    try { localStorage.removeItem(LS_USER) } catch {}
-    useContinueWatching.getState().clear()
-    set({ user: null })
-  },
+  logout: () => { persist(null); set({ user: null }) },
 }))
-
-// Auto-fetch CW when the page loads if user is already logged in
-const existing = loadUser()
-if (existing) {
-  setTimeout(() => useContinueWatching.getState().fetch(), 300)
-}

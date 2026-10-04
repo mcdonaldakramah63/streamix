@@ -1,4 +1,5 @@
 const axios = require('axios')
+const { safeHttp } = require('../utils/netGuard')
 
 const YTS_MIRRORS = [
   'https://yts.mx',
@@ -90,24 +91,34 @@ const getDownloadLinks = async (req, res) => {
   }
 }
 
+const torrentHttp = safeHttp({
+  responseType: 'arraybuffer', timeout: 15000, maxContentLength: 5 * 1024 * 1024, maxRedirects: 3,
+})
+torrentHttp.interceptors.request.use(cfg => {
+  const host = new URL(axios.getUri(cfg)).hostname
+  if (!YTS_MIRRORS.some(m => new URL(m).hostname === host)) throw new Error('Only YTS URLs allowed')
+  return cfg
+})
+
 const proxyTorrentFile = async (req, res) => {
   const { url, filename } = req.query
   if (!url) return res.status(400).json({ message: 'url required' })
 
-  const isYTS = YTS_MIRRORS.some(m => url.startsWith(m))
+  let host
+  try { host = new URL(url).hostname } catch { return res.status(400).json({ message: 'Invalid url' }) }
+  const isYTS = YTS_MIRRORS.some(m => new URL(m).hostname === host)
   if (!isYTS) return res.status(403).json({ message: 'Only YTS URLs allowed' })
+  const safeName = String(filename || 'movie.torrent').replace(/[^\w .()\[\]-]/g, '_').slice(0, 150)
 
   try {
-    const response = await axios.get(url, {
-      responseType: 'arraybuffer',
-      timeout: 15000,
-      headers: HEADERS,
-    })
+    // Stay on YTS hosts even through redirects, and cap the size (torrent files are tiny)
+    const response = await torrentHttp.get(url, { headers: HEADERS })
     res.setHeader('Content-Type', 'application/x-bittorrent')
-    res.setHeader('Content-Disposition', `attachment; filename="${filename || 'movie.torrent'}"`)
+    res.setHeader('Content-Disposition', `attachment; filename="${safeName}"`)
     res.send(Buffer.from(response.data))
   } catch (err) {
-    res.status(500).json({ message: 'Torrent fetch failed: ' + err.message })
+    console.error('[download] torrent fetch failed:', err.message)
+    res.status(502).json({ message: 'Could not fetch the torrent file' })
   }
 }
 

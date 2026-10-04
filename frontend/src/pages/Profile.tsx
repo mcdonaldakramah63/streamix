@@ -1,414 +1,274 @@
-// frontend/src/pages/Profile.tsx — FIXED PIN SAVE
+// frontend/src/pages/Profile.tsx — "Profile & Account Hub" (Stitch design)
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuthStore } from '../context/authStore'
-import { useProfileStore } from '../stores/profileStore'
-import api from '../services/api'
-
-const AVATARS = ['🎬','📺','🎌','🎭','🚀','👻','💕','⚔️','🧙','🔍','🎵','🌍','👨‍👩‍👧','🎨','😂','🦸','🐉','🏆']
-const COLORS  = ['#14b8a6','#8b5cf6','#f59e0b','#ef4444','#3b82f6','#10b981','#f97316','#ec4899','#6366f1','#84cc16']
-
-interface FormState {
-  name: string
-  avatar: string
-  color: string
-  isKids: boolean
-  pin?: string
-}
-
-function ProfileCard({
-  profile, isActive, onSelect, onEdit, onDelete,
-}: {
-  profile:any; isActive:boolean; onSelect:()=>void; onEdit:()=>void; onDelete:()=>void
-}) {
-  return (
-    <div className={`card p-4 transition-all cursor-pointer ${isActive ? 'ring-2 ring-brand' : 'hover:border-slate-600'}`}
-      onClick={onSelect}>
-      <div className="flex items-center gap-3 mb-3">
-        <div className="w-12 h-12 rounded-2xl flex items-center justify-center text-2xl flex-shrink-0"
-          style={{ background: (profile.color || '#14b8a6') + '25' }}>
-          {profile.avatar || '🎬'}
-        </div>
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2">
-            <p className="text-sm font-bold text-white truncate">{profile.name}</p>
-            {isActive && <span className="text-[10px] bg-brand/20 text-brand px-1.5 py-0.5 rounded-full font-bold">Active</span>}
-          </div>
-          <div className="flex items-center gap-1.5 mt-0.5">
-            {profile.isKids && <span className="text-[10px] bg-yellow-400/20 text-yellow-300 px-1.5 py-0.5 rounded-full font-bold">KIDS</span>}
-            {!profile.isKids && profile.pin && <span className="text-[10px] bg-amber-400/20 text-amber-300 px-1.5 py-0.5 rounded-full font-bold">🔒 PIN</span>}
-          </div>
-        </div>
-      </div>
-      <div className="flex gap-2" onClick={e => e.stopPropagation()}>
-        <button onClick={onSelect}
-          className={`flex-1 py-1.5 rounded-lg text-xs font-semibold transition-all ${isActive ? 'bg-brand/15 text-brand border border-brand/30' : 'btn-secondary'}`}>
-          {isActive ? '✓ Active' : 'Switch To'}
-        </button>
-        <button onClick={onEdit}
-          className="px-3 py-1.5 rounded-lg text-xs font-semibold text-slate-400 border border-dark-border hover:border-slate-500 hover:text-white transition-all">
-          Edit
-        </button>
-        <button onClick={onDelete}
-          className="px-3 py-1.5 rounded-lg text-xs font-semibold text-red-400/70 border border-dark-border hover:border-red-500/40 hover:text-red-400 transition-all">
-          ✕
-        </button>
-      </div>
-    </div>
-  )
-}
-
-function ProfileForm({
-  initial, onSave, onCancel, loading,
-}: {
-  initial: FormState
-  onSave: (f: FormState) => void
-  onCancel: () => void
-  loading: boolean
-}) {
-  const [form, setForm] = useState<FormState>(initial)
-
-  return (
-    <div className="space-y-4">
-      {/* Name */}
-      <div>
-        <label className="text-xs font-bold uppercase tracking-wider text-slate-500 block mb-1.5">Profile Name</label>
-        <input
-          value={form.name}
-          onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
-          placeholder="e.g. Kwame, Kids, Mum…"
-          maxLength={30}
-          className="input w-full"
-          autoFocus
-        />
-      </div>
-
-      {/* Avatar */}
-      <div>
-        <label className="text-xs font-bold uppercase tracking-wider text-slate-500 block mb-1.5">Avatar</label>
-        <div className="flex flex-wrap gap-2">
-          {AVATARS.map(a => (
-            <button key={a} type="button" onClick={() => setForm(f => ({ ...f, avatar: a }))}
-              className={`w-10 h-10 rounded-xl text-xl flex items-center justify-center transition-all ${
-                form.avatar === a ? 'ring-2 ring-brand bg-brand/15 scale-110' : 'bg-dark-surface hover:bg-dark-hover'
-              }`}>
-              {a}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* Color */}
-      <div>
-        <label className="text-xs font-bold uppercase tracking-wider text-slate-500 block mb-1.5">Color</label>
-        <div className="flex gap-2 flex-wrap">
-          {COLORS.map(c => (
-            <button key={c} type="button" onClick={() => setForm(f => ({ ...f, color: c }))}
-              className={`w-8 h-8 rounded-full transition-all ${form.color === c ? 'ring-2 ring-white scale-110' : ''}`}
-              style={{ background: c }} />
-          ))}
-        </div>
-      </div>
-
-      {/* Kids mode */}
-      <div>
-        <label className="text-xs font-bold uppercase tracking-wider text-slate-500 block mb-2">Kids Mode</label>
-        <button type="button" onClick={() => setForm(f => ({ ...f, isKids: !f.isKids }))}
-          className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl border transition-all ${
-            form.isKids ? 'bg-yellow-400/10 border-yellow-400/40 text-yellow-300' : 'border-dark-border text-slate-400 hover:border-slate-500'
-          }`}>
-          <div className={`w-10 h-6 rounded-full relative transition-colors flex-shrink-0 ${form.isKids ? 'bg-yellow-400' : 'bg-dark-border'}`}>
-            <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-transform ${form.isKids ? 'translate-x-5' : 'translate-x-1'}`} />
-          </div>
-          <div className="text-left">
-            <p className="text-sm font-semibold">{form.isKids ? '🌟 Kids Mode ON' : 'Kids Mode OFF'}</p>
-            <p className="text-xs opacity-60">
-              {form.isKids ? 'Safe content only, parental PIN to exit' : 'All content available'}
-            </p>
-          </div>
-        </button>
-      </div>
-
-      {/* PIN for adult profiles */}
-      {!form.isKids && (
-        <div>
-          <label className="text-xs font-bold uppercase tracking-wider text-slate-500 block mb-1.5">PIN Protection (optional)</label>
-          <input
-            type="password"
-            maxLength={4}
-            value={form.pin || ''}
-            onChange={e => setForm(f => ({ ...f, pin: e.target.value }))}
-            placeholder="4-digit PIN (optional)"
-            className="input w-full"
-          />
-          <p className="text-[10px] text-slate-500 mt-1">Leave empty if you don't want PIN protection</p>
-        </div>
-      )}
-
-      {/* Preview */}
-      <div className="p-3 rounded-xl bg-dark-surface border border-dark-border">
-        <p className="text-[10px] font-bold uppercase tracking-wider text-slate-600 mb-2">Preview</p>
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl flex items-center justify-center text-2xl"
-            style={{ background: (form.color || '#14b8a6') + '25' }}>
-            {form.avatar}
-          </div>
-          <div>
-            <p className="text-sm font-bold text-white">{form.name || 'Untitled'}</p>
-            <div className="flex gap-1 mt-0.5">
-              {form.isKids && <span className="text-[10px] bg-yellow-400/20 text-yellow-300 px-1.5 py-0.5 rounded-full font-bold">KIDS</span>}
-              {!form.isKids && form.pin && <span className="text-[10px] bg-amber-400/20 text-amber-300 px-1.5 py-0.5 rounded-full font-bold">🔒 PIN</span>}
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Buttons */}
-      <div className="flex gap-2">
-        <button type="button" onClick={onCancel} className="btn-secondary flex-1 py-2.5">Cancel</button>
-        <button type="button"
-          onClick={() => onSave(form)}
-          disabled={loading || !form.name.trim()}
-          className="btn-primary flex-1 py-2.5 disabled:opacity-60">
-          {loading ? <div className="w-4 h-4 border-2 border-dark/30 border-t-dark rounded-full animate-spin mx-auto" /> : 'Save Profile'}
-        </button>
-      </div>
-    </div>
-  )
-}
+import { useProfileStore, Profile as ViewerProfile } from '../stores/profileStore'
+import { useContinueWatching } from '../stores/continueWatchingStore'
+import { useWatchlistStore } from '../stores/watchlistStore'
+import { useDownloadStore } from '../stores/downloadStore'
+import { ProfileForm, ProfileBadge } from '../components/ProfileSelector'
+import { logout } from '../services/session'
+import api, { errorMessage } from '../services/api'
+import Icon from '../components/Icon'
+import KidsControlsModal from '../components/kids/KidsControlsModal'
+import AppAndNotifications from '../components/AppAndNotifications'
+import SecurityCard from '../components/SecurityCard'
+import ThemeAndBadges from '../components/ThemeAndBadges'
+import PlaybackSettings from '../components/PlaybackSettings'
+import { CodeBoxes, useCountdown } from '../components/EmailVerify'
 
 export default function Profile() {
   const navigate = useNavigate()
-  const { user, setUser, logout } = useAuthStore()
-  const { profiles, activeProfile, fetch: fetchProfiles, create, update, remove, setActive } = useProfileStore()
+  const { user, setUser } = useAuthStore()
+  const { profiles, activeProfile, remove, setActive } = useProfileStore()
+  const watching  = useContinueWatching(s => s.items.length)
+  const saved     = useWatchlistStore(s => s.items.length)
+  const downloads = useDownloadStore(s => s.downloads.filter(d => d.status === 'complete').length)
 
-  const [tab, setTab] = useState<'profiles'|'account'>('profiles')
-  const [editTarget, setEditTarget] = useState<any>(null)
-  const [showCreate, setShowCreate] = useState(false)
-  const [formLoading, setFormLoading] = useState(false)
-  const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null)
+  // ?tab=account (#notifications) — links from the bell's settings button and security alerts
+  const [tab,       setTab]       = useState<'profiles' | 'account'>(() => new URLSearchParams(location.search).get('tab') === 'account' ? 'account' : 'profiles')
+  useEffect(() => {
+    if (tab !== 'account' || !location.hash) return
+    const t = setTimeout(() => document.getElementById(location.hash.slice(1))?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 300)
+    return () => clearTimeout(t)
+  }, [tab])
+  const [editing,   setEditing]   = useState<ViewerProfile | null | 'new'>(null)
+  const [confirmId, setConfirmId] = useState<string | null>(null)
+  const [kidsFor,   setKidsFor]   = useState<ViewerProfile | null>(null)
+  const [maxProfiles, setMaxProfiles] = useState(5)
+  useEffect(() => { api.get('/settings/public').then(r => setMaxProfiles(r.data.maxProfiles || 5)).catch(() => {}) }, [])
 
-  // Account settings
   const [username, setUsername] = useState(user?.username || '')
-  const [email, setEmail] = useState(user?.email || '')
-  const [pwForm, setPwForm] = useState({ current: '', next: '', confirm: '' })
-  const [acctMsg, setAcctMsg] = useState('')
-  const [acctErr, setAcctErr] = useState('')
-  const [acctLoad, setAcctLoad] = useState(false)
+  const [email,    setEmail]    = useState(user?.email || '')
+  const [pw,       setPw]       = useState({ current: '', next: '', confirm: '' })
+  const [msg,      setMsg]      = useState<{ ok: boolean; text: string } | null>(null)
+  const [busy,     setBusy]     = useState(false)
+  const [emailPw,  setEmailPw]  = useState('')
+  // Email change waiting for the code sent to the new address
+  const [pendingEmail, setPendingEmail] = useState<string | null>((user as any)?.pendingEmail || null)
+  const [emailCode, setEmailCode] = useState('')
+  const [resendLeft, setResendLeft] = useCountdown(0)
+  const [typoFix, setTypoFix] = useState<string | null>(null)
+  useEffect(() => { api.get('/users/profile').then(r => setPendingEmail(r.data?.pendingEmail || null)).catch(() => {}) }, [])
 
-  useEffect(() => { if (user) fetchProfiles() }, [user?._id])
-
-  if (!user) {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="text-center">
-          <p className="text-slate-400 mb-4">Sign in to manage your profile</p>
-          <button onClick={() => navigate('/login')} className="btn-primary px-6 py-2.5">Sign In</button>
-        </div>
-      </div>
-    )
-  }
-
-  const handleCreateSave = async (form: FormState) => {
-    if (!form.name.trim()) return
-    setFormLoading(true)
-    try {
-      await create(form)
-      setShowCreate(false)
-      await fetchProfiles()
-    } catch (e: any) {
-      alert(e?.response?.data?.message || 'Failed to create profile')
-    } finally { setFormLoading(false) }
-  }
-
-  const handleEditSave = async (form: FormState) => {
-    if (!form.name.trim() || !editTarget) return
-    setFormLoading(true)
-    try {
-      await update(editTarget._id, form)
-      setEditTarget(null)
-      await fetchProfiles()
-    } catch (e: any) {
-      alert(e?.response?.data?.message || 'Failed to update profile')
-    } finally { setFormLoading(false) }
-  }
-
-  const handleDelete = async (id: string) => {
-    try {
-      await remove(id)
-      setDeleteConfirm(null)
-    } catch (e: any) {
-      alert(e?.response?.data?.message || 'Failed to delete profile')
-    }
-  }
+  if (!user) return null
 
   const saveAccount = async () => {
-    setAcctLoad(true); setAcctMsg(''); setAcctErr('')
+    setBusy(true); setMsg(null)
     try {
-      const { data } = await api.put('/users/profile', { username: username.trim(), email: email.trim() })
-      setUser({ ...user, ...data })
-      setAcctMsg('Account updated!')
+      const emailChanged = email.trim().toLowerCase() !== (user.email || '').toLowerCase()
+      const { data } = await api.put('/users/profile', { username: username.trim(), email: email.trim(), ...(emailChanged ? { currentPassword: emailPw, confirmTypo: typoFix === 'confirmed' } : {}) })
+      setEmailPw(''); setTypoFix(null)
+      setUser({ ...user, username: data.username, email: data.email, avatar: data.avatar, token: user.token })
+      if (data.verificationRequired) {
+        setPendingEmail(data.pendingEmail); setEmailCode(''); setResendLeft(data.resendIn || 30); setEmail(data.email)
+        setMsg({ ok: true, text: `We sent a code to ${data.pendingEmail}. Enter it below to switch your email.` })
+      } else setMsg({ ok: true, text: data.changed ? 'Email changed' : 'Account updated' })
     } catch (e: any) {
-      setAcctErr(e?.response?.data?.message || 'Update failed')
-    } finally { setAcctLoad(false) }
+      const d = e?.response?.data
+      if (d?.reason === 'typo' && d?.suggestion) setTypoFix(d.suggestion)
+      setMsg({ ok: false, text: errorMessage(e, 'Update failed') })
+    }
+    finally { setBusy(false) }
+  }
+
+  const confirmEmailChange = async (code = emailCode) => {
+    if (code.length !== 6) return
+    setBusy(true); setMsg(null)
+    try {
+      const { data } = await api.post('/users/email/verify', { code })
+      setUser({ ...user, email: data.email, token: user.token })
+      setEmail(data.email); setPendingEmail(null); setEmailCode('')
+      setMsg({ ok: true, text: `Your email is now ${data.email}` })
+    } catch (e) { setEmailCode(''); setMsg({ ok: false, text: errorMessage(e, 'That code didn’t work') }) }
+    finally { setBusy(false) }
+  }
+  const resendEmailCode = async () => {
+    try { const { data } = await api.post('/users/email/resend'); setResendLeft(data.resendIn || 30); setMsg({ ok: true, text: 'New code sent' }) }
+    catch (e: any) { if (e?.response?.data?.resendIn) setResendLeft(e.response.data.resendIn); setMsg({ ok: false, text: errorMessage(e, 'Couldn’t send a new code') }) }
+  }
+  const cancelEmailChange = async () => {
+    await api.delete('/users/email/pending').catch(() => {})
+    setPendingEmail(null); setEmailCode(''); setMsg(null)
   }
 
   const changePassword = async () => {
-    if (pwForm.next !== pwForm.confirm) return setAcctErr('Passwords do not match')
-    if (pwForm.next.length < 8) return setAcctErr('Password must be at least 8 characters')
-    setAcctLoad(true); setAcctMsg(''); setAcctErr('')
+    if (pw.next !== pw.confirm) { setMsg({ ok: false, text: 'New passwords do not match' }); return }
+    setBusy(true); setMsg(null)
     try {
-      await api.put('/users/password', { currentPassword: pwForm.current, newPassword: pwForm.next })
-      setPwForm({ current: '', next: '', confirm: '' })
-      setAcctMsg('Password changed!')
-    } catch (e: any) {
-      setAcctErr(e?.response?.data?.message || 'Failed to change password')
-    } finally { setAcctLoad(false) }
+      // The server signs out other devices and returns a fresh session for this one
+      const { data } = await api.put('/users/password', { currentPassword: pw.current, newPassword: pw.next })
+      if (data?.token) setUser({ ...user, ...data })
+      setPw({ current: '', next: '', confirm: '' })
+      setMsg({ ok: true, text: 'Password changed — other devices have been signed out' })
+    } catch (e) { setMsg({ ok: false, text: errorMessage(e, 'Could not change password') }) }
+    finally { setBusy(false) }
   }
 
-  return (
-    <div className="min-h-screen pt-20 px-4 sm:px-6 max-w-3xl mx-auto pb-16">
+  const stats = [
+    { label: 'Watching',  value: watching,  icon: 'play_circle',          tone: 'text-brand' },
+    { label: 'My List',   value: saved,     icon: 'bookmark',             tone: 'text-gold'  },
+    { label: 'Downloads', value: downloads, icon: 'download_for_offline', tone: 'text-cyan'  },
+  ]
 
-      {/* Page header */}
-      <div className="flex items-center gap-3 mb-6">
-        <div className="w-14 h-14 rounded-2xl bg-brand/20 flex items-center justify-center text-brand font-black text-2xl flex-shrink-0">
-          {(activeProfile?.avatar || user.username?.[0] || 'U').slice(0,2)}
+  return (
+    <div className="min-h-screen pt-24 px-4 sm:px-6 max-w-3xl mx-auto pb-16">
+      {/* Header card */}
+      <div className="card p-5 sm:p-6 mb-6 relative overflow-hidden">
+        <div className="absolute -top-16 -right-16 w-56 h-56 bg-brand/10 rounded-full blur-3xl pointer-events-none" />
+        <div className="flex items-center gap-4 relative">
+          <ProfileBadge p={activeProfile || { avatar: user.username[0]?.toUpperCase(), color: '#e50914', isKids: false }} size="sm" />
+          <div className="min-w-0 flex-1">
+            <h1 className="text-xl font-extrabold text-white truncate">{activeProfile?.name || user.username}</h1>
+            <p className="text-ink-faint text-sm truncate">{user.email}</p>
+          </div>
+          {user.isAdmin && <span className="tech-pill text-gold">Admin</span>}
         </div>
-        <div>
-          <h1 className="text-xl font-black text-white" style={{ fontFamily:'Syne, sans-serif' }}>
-            {activeProfile?.name || user.username}
-          </h1>
-          <p className="text-slate-500 text-sm">{user.email}</p>
+        <div className="grid grid-cols-3 gap-3 mt-5 relative">
+          {stats.map(s => (
+            <div key={s.label} className="rounded-2xl bg-dark-surface p-3 text-center">
+              <Icon name={s.icon} size={20} className={s.tone} />
+              <p className="text-xl font-extrabold text-white mt-1">{s.value}</p>
+              <p className="text-label-sm uppercase text-ink-faint">{s.label}</p>
+            </div>
+          ))}
         </div>
       </div>
 
       {/* Tabs */}
-      <div className="flex gap-1 p-1 rounded-xl mb-6" style={{ background:'rgba(255,255,255,0.04)', border:'1px solid rgba(255,255,255,0.06)' }}>
-        {(['profiles','account'] as const).map(t => (
-          <button key={t} onClick={() => setTab(t)}
-            className={`flex-1 py-2 rounded-lg text-sm font-semibold capitalize transition-all ${
-              tab===t ? 'bg-dark-card text-white shadow' : 'text-slate-400 hover:text-white'
-            }`}>
-            {t === 'profiles' ? '👤 Profiles' : '⚙️ Account'}
+      <div className="flex gap-1 p-1 rounded-full bg-dark-card mb-6" role="tablist">
+        {(['profiles', 'account'] as const).map(t => (
+          <button key={t} role="tab" aria-selected={tab === t} onClick={() => { setTab(t); setMsg(null) }}
+            className={`flex-1 h-10 rounded-full text-sm font-bold capitalize transition-all ${tab === t ? 'bg-brand text-white shadow-brand-sm' : 'text-ink-muted hover:text-white'}`}>
+            {t}
           </button>
         ))}
       </div>
 
-      {/* Profiles tab */}
+      {tab === 'profiles' && !editing && !activeProfile?.isKids && <PlaybackSettings />}
+      {tab === 'profiles' && !editing && !activeProfile?.isKids && <ThemeAndBadges />}
       {tab === 'profiles' && (
-        <div>
-          <div className="space-y-3 mb-4">
-            {profiles.map(p => (
-              <ProfileCard key={p._id} profile={p}
-                isActive={activeProfile?._id === p._id}
-                onSelect={() => setActive(p)}
-                onEdit={() => { setEditTarget(p); setShowCreate(false) }}
-                onDelete={() => setDeleteConfirm(p._id)}
-              />
-            ))}
+        editing ? (
+          <ProfileForm editing={editing === 'new' ? null : editing} onCancel={() => setEditing(null)} onDone={() => setEditing(null)} />
+        ) : (
+          <div className="space-y-2.5">
+            {profiles.map(p => {
+              const isActive = activeProfile?._id === p._id
+              return (
+                <div key={p._id} className={`card p-3 flex items-center gap-3 ${isActive ? 'ring-1 ring-brand/60' : ''}`}>
+                  <ProfileBadge p={p} size="sm" />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-bold text-white truncate flex items-center gap-1.5">
+                      {p.name}{p.hasPin && <Icon name="lock" size={14} className="text-ink-faint" />}
+                    </p>
+                    <p className="text-xs text-ink-faint">{isActive ? 'Watching now' : p.isKids ? 'Kids profile' : 'Standard profile'}</p>
+                  </div>
+                  {!isActive && (
+                    <button onClick={async () => { if (await setActive(p)) navigate(p.isKids ? '/kids' : '/') }} className="btn-secondary px-4 py-1.5 text-xs">Switch</button>
+                  )}
+                  {p.isKids && !activeProfile?.isKids && (
+                    <button onClick={() => setKidsFor(p)} title="Kids controls" aria-label={`Kids controls for ${p.name}`}
+                      className="h-9 px-3 rounded-full flex items-center gap-1.5 text-xs font-bold text-gold hover:bg-gold/10">
+                      <Icon name="family_restroom" size={18} /><span className="hidden sm:inline">Controls</span>
+                    </button>
+                  )}
+                  <button onClick={() => setEditing(p)} aria-label={`Edit ${p.name}`} className="w-9 h-9 rounded-full flex items-center justify-center text-ink-faint hover:text-white hover:bg-white/[0.06]">
+                    <Icon name="edit" size={18} />
+                  </button>
+                  {profiles.length > 1 && (
+                    <button onClick={() => setConfirmId(p._id)} aria-label={`Delete ${p.name}`} className="w-9 h-9 rounded-full flex items-center justify-center text-ink-faint hover:text-brand-soft hover:bg-brand/10">
+                      <Icon name="delete" size={18} />
+                    </button>
+                  )}
+                </div>
+              )
+            })}
+            {kidsFor && <KidsControlsModal profile={kidsFor} onClose={() => setKidsFor(null)} />}
+            {profiles.length < maxProfiles && (
+              <button onClick={() => setEditing('new')} className="w-full h-14 rounded-2xl border-2 border-dashed border-white/10 text-ink-muted hover:border-brand/50 hover:text-white text-sm font-bold flex items-center justify-center gap-2 transition-all">
+                <Icon name="add" size={20} /> Add profile ({profiles.length}/{maxProfiles})
+              </button>
+            )}
           </div>
+        )
+      )}
 
-          {profiles.length < 5 && !showCreate && !editTarget && (
-            <button onClick={() => { setShowCreate(true); setEditTarget(null) }}
-              className="w-full py-3 rounded-2xl border-2 border-dashed border-dark-border text-slate-500 hover:border-brand/50 hover:text-brand text-sm font-semibold flex items-center justify-center gap-2 transition-all">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M12 5v14M5 12h14"/>
-              </svg>
-              Add Profile ({profiles.length}/5)
-            </button>
+      {tab === 'account' && (
+        <div className="space-y-4">
+          {msg && (
+            <div role="status" className={`rounded-xl px-4 py-3 text-sm font-semibold ${msg.ok ? 'bg-cyan/10 text-cyan' : 'bg-brand/10 text-brand-soft'}`}>{msg.text}</div>
           )}
-
-          {showCreate && (
-            <div className="card p-4 mt-3">
-              <h3 className="text-base font-bold text-white mb-4" style={{ fontFamily:'Syne, sans-serif' }}>New Profile</h3>
-              <ProfileForm
-                initial={{ name: '', avatar: '🎬', color: '#14b8a6', isKids: false, pin: '' }}
-                onSave={handleCreateSave}
-                onCancel={() => setShowCreate(false)}
-                loading={formLoading}
-              />
-            </div>
-          )}
-
-          {editTarget && (
-            <div className="card p-4 mt-3">
-              <h3 className="text-base font-bold text-white mb-4" style={{ fontFamily:'Syne, sans-serif' }}>
-                Edit: {editTarget.name}
-              </h3>
-              <ProfileForm
-                initial={{
-                  name: editTarget.name,
-                  avatar: editTarget.avatar || '🎬',
-                  color: editTarget.color || '#14b8a6',
-                  isKids: !!editTarget.isKids,
-                  pin: editTarget.pin || ''
-                }}
-                onSave={handleEditSave}
-                onCancel={() => setEditTarget(null)}
-                loading={formLoading}
-              />
-            </div>
-          )}
-
-          {deleteConfirm && (
-            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
-              <div className="card p-5 max-w-sm w-full">
-                <p className="text-white font-bold mb-1">Delete this profile?</p>
-                <p className="text-slate-500 text-sm mb-4">All watch history for this profile will be lost.</p>
-                <div className="flex gap-2">
-                  <button onClick={() => setDeleteConfirm(null)} className="btn-secondary flex-1 py-2">Cancel</button>
-                  <button onClick={() => handleDelete(deleteConfirm)} className="flex-1 py-2 bg-red-500/20 text-red-400 rounded-xl font-semibold hover:bg-red-500/30 border border-red-500/30 transition-all">Delete</button>
+          <AppAndNotifications />
+          <SecurityCard />
+          <section className="card p-5 space-y-3">
+            <h2 className="text-label-sm uppercase text-ink-faint">Account info</h2>
+            <label className="block"><span className="text-xs text-ink-muted">Username</span>
+              <input value={username} onChange={e => setUsername(e.target.value)} className="input mt-1" autoComplete="username" /></label>
+            <label className="block"><span className="text-xs text-ink-muted">Email</span>
+              <input value={email} onChange={e => setEmail(e.target.value)} type="email" className="input mt-1" autoComplete="email" /></label>
+            {typoFix && typoFix !== 'confirmed' && (
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[13px] -mt-1">
+                <span className="text-gold">Did you mean</span>
+                <button type="button" onClick={() => { setEmail(typoFix); setTypoFix(null) }} className="font-bold text-white underline decoration-gold/60 underline-offset-2">{typoFix}</button>
+                <span className="text-ink-faint">?</span>
+                <button type="button" onClick={() => setTypoFix('confirmed')} className="ml-auto text-xs text-ink-faint hover:text-white">No, it’s correct</button>
+              </div>
+            )}
+            {email.trim().toLowerCase() !== (user.email || '').toLowerCase() && (
+              <label className="block"><span className="text-xs text-ink-muted">Current password (needed to change your email)</span>
+                <input value={emailPw} onChange={e => setEmailPw(e.target.value)} type="password" className="input mt-1" autoComplete="current-password" /></label>
+            )}
+            {pendingEmail && (
+              <div className="rounded-2xl border border-gold/25 bg-gold/[0.06] p-4 space-y-3">
+                <div className="flex items-start gap-2.5">
+                  <Icon name="mark_email_unread" size={20} className="text-gold mt-0.5 flex-shrink-0" />
+                  <p className="text-sm text-ink">Enter the code we sent to <span className="font-bold text-white break-all">{pendingEmail}</span>. Until then you keep signing in with {user.email}.</p>
+                </div>
+                <CodeBoxes value={emailCode} onChange={setEmailCode} onComplete={confirmEmailChange} disabled={busy} />
+                <div className="flex flex-wrap items-center gap-2">
+                  <button onClick={() => confirmEmailChange()} disabled={busy || emailCode.length !== 6} className="btn-primary px-4 py-2 text-xs disabled:opacity-50">Confirm new email</button>
+                  <button onClick={resendEmailCode} disabled={resendLeft > 0} className="btn-ghost px-3 py-2 text-xs disabled:opacity-50">{resendLeft > 0 ? `Resend in ${resendLeft}s` : 'Resend code'}</button>
+                  <button onClick={cancelEmailChange} className="ml-auto text-xs text-ink-faint hover:text-white">Cancel change</button>
                 </div>
               </div>
-            </div>
-          )}
+            )}
+            <button onClick={saveAccount} disabled={busy} className="btn-primary w-full h-11 disabled:opacity-60">Save changes</button>
+          </section>
+
+          <section className="card p-5 space-y-3">
+            <h2 className="text-label-sm uppercase text-ink-faint">Change password</h2>
+            <input value={pw.current} onChange={e => setPw(f => ({ ...f, current: e.target.value }))} type="password" placeholder="Current password" className="input" autoComplete="current-password" />
+            <input value={pw.next} onChange={e => setPw(f => ({ ...f, next: e.target.value }))} type="password" placeholder="New password" className="input" autoComplete="new-password" />
+            <input value={pw.confirm} onChange={e => setPw(f => ({ ...f, confirm: e.target.value }))} type="password" placeholder="Confirm new password" className="input" autoComplete="new-password" />
+            <p className="text-xs text-ink-faint">8+ characters with an uppercase letter, a number and a symbol.</p>
+            <button onClick={changePassword} disabled={busy || !pw.current || !pw.next} className="btn-secondary w-full h-11 disabled:opacity-50">Update password</button>
+          </section>
+
+          <section className="card p-5">
+            <button onClick={async () => { await logout(); navigate('/') }} className="w-full h-11 rounded-full text-sm font-bold text-brand-soft border border-brand/30 hover:bg-brand/10 transition-all flex items-center justify-center gap-2">
+              <Icon name="logout" size={18} /> Sign out
+            </button>
+            <button onClick={async () => {
+                if (!confirm('Sign out on every device, including this one?')) return
+                try { await api.post('/auth/logout-all') } catch { /* signed out anyway below */ }
+                await logout(); navigate('/')
+              }}
+              className="w-full mt-2 h-10 rounded-full text-xs font-semibold text-ink-faint hover:text-white flex items-center justify-center gap-2">
+              <Icon name="devices" size={16} /> Sign out everywhere
+            </button>
+          </section>
         </div>
       )}
 
-      {/* Account tab */}
-      {tab === 'account' && (
-        <div className="space-y-4">
-          <div className="card p-4">
-            <h3 className="text-sm font-bold uppercase tracking-wider text-slate-500 mb-4">Account Info</h3>
-            <div className="space-y-3">
-              <div>
-                <label className="text-xs text-slate-500 block mb-1">Username</label>
-                <input value={username} onChange={e => setUsername(e.target.value)} className="input w-full" placeholder="Username"/>
-              </div>
-              <div>
-                <label className="text-xs text-slate-500 block mb-1">Email</label>
-                <input value={email} onChange={e => setEmail(e.target.value)} type="email" className="input w-full" placeholder="Email"/>
-              </div>
-              {acctMsg && <p className="text-green-400 text-sm">{acctMsg}</p>}
-              {acctErr && <p className="text-red-400 text-sm">{acctErr}</p>}
-              <button onClick={saveAccount} disabled={acctLoad} className="btn-primary w-full py-2.5 disabled:opacity-60">
-                {acctLoad ? 'Saving…' : 'Save Changes'}
-              </button>
+      {confirmId && (
+        <div className="fixed inset-0 z-[210] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4" role="dialog" aria-modal="true">
+          <div className="card p-5 max-w-sm w-full">
+            <p className="text-white font-bold mb-1">Delete this profile?</p>
+            <p className="text-ink-muted text-sm mb-4">Its watch history and recommendations will be lost.</p>
+            <div className="flex gap-2">
+              <button onClick={() => setConfirmId(null)} className="btn-secondary flex-1">Cancel</button>
+              <button onClick={async () => { try { await remove(confirmId) } finally { setConfirmId(null) } }} className="btn-primary flex-1">Delete</button>
             </div>
-          </div>
-
-          <div className="card p-4">
-            <h3 className="text-sm font-bold uppercase tracking-wider text-slate-500 mb-4">Change Password</h3>
-            <div className="space-y-3">
-              <input value={pwForm.current} onChange={e => setPwForm(f=>({...f,current:e.target.value}))}
-                type="password" placeholder="Current password" className="input w-full"/>
-              <input value={pwForm.next} onChange={e => setPwForm(f=>({...f,next:e.target.value}))}
-                type="password" placeholder="New password (min 8 chars)" className="input w-full"/>
-              <input value={pwForm.confirm} onChange={e => setPwForm(f=>({...f,confirm:e.target.value}))}
-                type="password" placeholder="Confirm new password" className="input w-full"/>
-              <button onClick={changePassword} disabled={acctLoad || !pwForm.current || !pwForm.next}
-                className="btn-primary w-full py-2.5 disabled:opacity-60">
-                {acctLoad ? 'Changing…' : 'Change Password'}
-              </button>
-            </div>
-          </div>
-
-          <div className="card p-4 border-red-500/20">
-            <h3 className="text-sm font-bold uppercase tracking-wider text-red-400/70 mb-3">Danger Zone</h3>
-            <button onClick={() => { logout(); navigate('/') }}
-              className="w-full py-2.5 rounded-xl text-sm font-semibold text-red-400 border border-red-500/30 hover:bg-red-500/10 transition-all">
-              Sign Out
-            </button>
           </div>
         </div>
       )}

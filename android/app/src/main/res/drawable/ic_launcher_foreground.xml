@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Streamix prism mark (same S + play glyph as the web logo), sized for the adaptive-icon safe zone -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <group android:translateX="32" android:translateY="32">
+        <path
+            android:pathData="M30,15.5c-1.6,-1.7 -4.2,-2.5 -7,-2.5 -4,0 -7,2 -7,5.2 0,7.3 14.5,3.6 14.5,10.7 0,3.3 -3.1,5.6 -7.6,5.6 -3,0 -5.8,-1 -7.5,-2.9"
+            android:strokeWidth="4"
+            android:strokeLineCap="round"
+            android:fillColor="#00000000">
+            <aapt:attr name="android:strokeColor">
+                <gradient
+                    android:type="linear"
+                    android:startX="0" android:startY="0"
+                    android:endX="44" android:endY="44">
+                    <item android:offset="0" android:color="#FFFF3366" />
+                    <item android:offset="0.5" android:color="#FFE50914" />
+                    <item android:offset="1" android:color="#FFF59E0B" />
+                </gradient>
+            </aapt:attr>
+        </path>
+        <path android:pathData="M20,19.5L25,22L20,24.5Z" android:fillColor="#F59E0B" />
+    </group>
+</vector>

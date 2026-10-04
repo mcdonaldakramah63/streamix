@@ -37,11 +37,13 @@ export default function PersonPage() {
     ]).then(([p, c]) => {
       setPerson(p.data)
       // Combine cast + directing credits, dedupe, sort by popularity
-      const cast = (c.data.cast  || []).map((x: any) => ({ ...x, _role: 'cast', media_type: x.first_air_date ? 'tv' : 'movie' }))
-      const dir  = (c.data.crew  || []).filter((x: any) => x.job === 'Director').map((x: any) => ({ ...x, _role: 'director', media_type: x.first_air_date ? 'tv' : 'movie' }))
+      const typeOf = (x: any) => x.media_type === 'tv' || x.media_type === 'movie' ? x.media_type : (x.first_air_date ? 'tv' : 'movie')
+      const cast = (c.data.cast  || []).map((x: any) => ({ ...x, _role: 'cast', media_type: typeOf(x) }))
+      const dir  = (c.data.crew  || []).filter((x: any) => x.job === 'Director').map((x: any) => ({ ...x, _role: 'director', media_type: typeOf(x) }))
       const all  = [...cast, ...dir]
-      const seen = new Set<number>()
-      const deduped = all.filter(x => { if (seen.has(x.id)) return false; seen.add(x.id); return true })
+      // Movie and TV ids can collide, so dedupe on type + id
+      const seen = new Set<string>()
+      const deduped = all.filter(x => { const k = `${x.media_type}-${x.id}`; if (seen.has(k)) return false; seen.add(k); return true })
       setCredits(deduped.sort((a, b) => (b.popularity||0) - (a.popularity||0)).slice(0, 48))
     }).catch(console.error).finally(() => setLoading(false))
   }, [id])
@@ -62,7 +64,7 @@ export default function PersonPage() {
   )
 
   if (!person) return (
-    <div className="pt-16 min-h-screen flex items-center justify-center text-slate-500">Person not found</div>
+    <div className="pt-16 min-h-screen flex items-center justify-center text-ink-faint">Person not found</div>
   )
 
   const age = person.birthday && !person.deathday
@@ -82,7 +84,7 @@ export default function PersonPage() {
 
         {/* Back */}
         <button onClick={() => navigate(-1)}
-          className="flex items-center gap-1.5 text-slate-500 hover:text-white transition-colors text-sm mb-7 group">
+          className="flex items-center gap-1.5 text-ink-faint hover:text-white transition-colors text-sm mb-7 group">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"
             className="group-hover:-translate-x-0.5 transition-transform">
             <path d="m15 18-6-6 6-6"/>
@@ -108,20 +110,20 @@ export default function PersonPage() {
           <div className="flex-1 min-w-0">
             <p className="text-brand text-xs font-bold uppercase tracking-widest mb-2">{person.known_for_department}</p>
             <h1 className="font-bold text-white mb-3 leading-tight"
-              style={{ fontFamily:'Syne, sans-serif', fontSize:'clamp(1.4rem,4vw,2.5rem)' }}>
+              style={{ fontFamily:'Plus Jakarta Sans, sans-serif', fontSize:'clamp(1.4rem,4vw,2.5rem)' }}>
               {person.name}
             </h1>
 
             {/* Meta pills */}
             <div className="flex flex-wrap gap-2 mb-5">
               {person.birthday && (
-                <div className="glass rounded-xl px-3 py-1.5 text-xs text-slate-300">
+                <div className="glass rounded-xl px-3 py-1.5 text-xs text-ink">
                   🎂 {new Date(person.birthday).toLocaleDateString('en-US', { year:'numeric', month:'long', day:'numeric' })}
-                  {age && <span className="text-slate-500 ml-1">({age})</span>}
+                  {age && <span className="text-ink-faint ml-1">({age})</span>}
                 </div>
               )}
               {person.place_of_birth && (
-                <div className="glass rounded-xl px-3 py-1.5 text-xs text-slate-300">
+                <div className="glass rounded-xl px-3 py-1.5 text-xs text-ink">
                   📍 {person.place_of_birth}
                 </div>
               )}
@@ -139,8 +141,8 @@ export default function PersonPage() {
                 { label: 'TV',     value: tvCount,    icon: '📺' },
               ].map(s => (
                 <div key={s.label} className="card px-4 py-2.5 text-center min-w-[80px]">
-                  <div className="text-xl font-bold text-white" style={{ fontFamily:'Syne, sans-serif' }}>{s.value}</div>
-                  <div className="text-[10px] text-slate-500 flex items-center gap-1 justify-center mt-0.5">
+                  <div className="text-xl font-bold text-white" style={{ fontFamily:'Plus Jakarta Sans, sans-serif' }}>{s.value}</div>
+                  <div className="text-[10px] text-ink-faint flex items-center gap-1 justify-center mt-0.5">
                     <span>{s.icon}</span>{s.label}
                   </div>
                 </div>
@@ -150,7 +152,7 @@ export default function PersonPage() {
             {/* Biography */}
             {person.biography ? (
               <div>
-                <p className={`text-slate-400 text-sm leading-relaxed ${showFull ? '' : 'line-clamp-4'}`}>
+                <p className={`text-ink-muted text-sm leading-relaxed ${showFull ? '' : 'line-clamp-4'}`}>
                   {person.biography}
                 </p>
                 {person.biography.length > 300 && (
@@ -161,7 +163,7 @@ export default function PersonPage() {
                 )}
               </div>
             ) : (
-              <p className="text-slate-600 text-sm italic">No biography available.</p>
+              <p className="text-ink-faint text-sm italic">No biography available.</p>
             )}
           </div>
         </div>
@@ -181,7 +183,7 @@ export default function PersonPage() {
                 ].map(t => (
                   <button key={t.key} onClick={() => setTab(t.key as any)}
                     className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all whitespace-nowrap ${
-                      tab === t.key ? 'bg-brand text-dark' : 'text-slate-400 hover:text-white'
+                      tab === t.key ? 'bg-brand text-white' : 'text-ink-muted hover:text-white'
                     }`}>
                     {t.label}
                   </button>
@@ -191,7 +193,7 @@ export default function PersonPage() {
 
             <div className="movie-card-grid">
               {filteredCredits.map(c => (
-                <MovieCard key={c.id} movie={c} showType={tab === 'all'} />
+                <MovieCard key={`${c.media_type}-${c.id}`} movie={c} showType={tab === 'all'} />
               ))}
             </div>
           </div>

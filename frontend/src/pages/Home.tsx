@@ -1,64 +1,95 @@
-// frontend/src/pages/Home.tsx
+// frontend/src/pages/Home.tsx — "Home & Discover" (Stitch design)
 import { useEffect, useState, useRef, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import api from '../services/api'
-import Carousel from '../components/Carousel'
-import MovieCard from '../components/MovieCard'
+import Carousel, { RailHeader } from '../components/Carousel'
+import MovieCard, { CardMovie } from '../components/MovieCard'
 import ContinueWatchingRow from '../components/ContinueWatchingRow'
 import RecommendationsRow from '../components/RecommendationsRow'
-import AnimatedPosterCard from '../components/AnimatedPosterCard'
+import LibraryRow from '../components/LibraryRow'
+import CollectionRows from '../components/CollectionRows'
+import UpcomingRow from '../components/UpcomingRow'
+import { useTop10 } from '../stores/top10Store'
 import VerticalFeed from '../components/VerticalFeed'
+import Icon from '../components/Icon'
 import { useInfiniteScroll } from '../hooks/useInfiniteScroll'
 import { useAuthStore } from '../context/authStore'
+import { track } from '../utils/track'
 import { useProfileStore } from '../stores/profileStore'
-import Kids from './Kids';
+import { useWatchlistStore } from '../stores/watchlistStore'
 
-const BD = (p: string | null) => (p ? `https://image.tmdb.org/t/p/w1280${p}` : '')
+const BD = (p?: string | null) => (p ? `https://image.tmdb.org/t/p/original${p}` : '')
 
-interface Movie {
-  id: number
-  title?: string
-  name?: string
-  overview?: string
+interface Movie extends CardMovie {
   backdrop_path: string | null
-  poster_path?: string | null
-  vote_average: number
-  release_date?: string
+  vote_average:  number
+  genre_ids?:    number[]
 }
 
+const GENRES = [
+  { id: 28, label: 'Action' }, { id: 878, label: 'Sci-Fi' }, { id: 53, label: 'Thriller' },
+  { id: 35, label: 'Comedy' }, { id: 27, label: 'Horror' }, { id: 16, label: 'Animation' },
+  { id: 18, label: 'Drama' },  { id: 10749, label: 'Romance' }, { id: 99, label: 'Documentary' },
+]
 
 export default function Home() {
   const navigate = useNavigate()
-  const { user } = useAuthStore()
-  const { activeProfile } = useProfileStore()
+  const topTv = useTop10(s => s.tv)
+  const [shuffling, setShuffling] = useState(false)
+  // "Play something": the server picks one thing to start right now — resume, next/new episode, a top pick,
+  // something new on Streamix — weighing the time you probably have, your habits at this hour and what you
+  // usually accept. Pressing again skips what it just offered.
+  const shuffleSkip = useRef<string[]>([])
+  const [shuffleNote, setShuffleNote] = useState('')
+  const playSomething = async () => {
+    setShuffling(true)
+    try {
+      const profile = useProfileStore.getState().activeProfile
+      if (profile) {
+        const now = new Date()
+        const { data } = await api.post(`/profiles/${profile._id}/play-something`, { hour: now.getHours(), dow: now.getDay(), skip: shuffleSkip.current.slice(-20) })
+        const p = data.pick
+        shuffleSkip.current.push(`${p.type}:${p.id}`)
+        setShuffleNote(`${p.title} — ${p.reason}`)
+        track('play', p.type, p.id, { source: 'shuffle' })
+        navigate(p.type === 'tv' ? `/player/tv/${p.id}?season=${p.season || 1}&episode=${p.episode || 1}` : `/player/movie/${p.id}`)
+        return
+      }
+      // Not signed in: a random title among widely loved ones
+      const type = Math.random() < 0.65 ? 'movie' : 'tv'
+      const { data } = await api.get('/movies/discover', { params: { type, sort_by: 'vote_average.desc', 'vote_count.gte': 1500, page: 1 + Math.floor(Math.random() * 10) } })
+      const pick = data.results[Math.floor(Math.random() * data.results.length)]
+      if (pick) navigate(type === 'tv' ? `/player/tv/${pick.id}?season=1&episode=1` : `/player/movie/${pick.id}`)
+    } catch { setShuffleNote('Couldn\'t pick something right now — try again') } finally { setShuffling(false) }
+  }
+  const user = useAuthStore(s => s.user)
+  const { isIn, toggle } = useWatchlistStore()
 
-  const [trending, setTrending] = useState<Movie[]>([])
-  const [topRated, setTopRated] = useState<Movie[]>([])
-  const [upcoming, setUpcoming] = useState<Movie[]>([])
+  const [trending,   setTrending]   = useState<Movie[]>([])
+  const [topRated,   setTopRated]   = useState<Movie[]>([])
+  const [upcoming,   setUpcoming]   = useState<Movie[]>([])
   const [nowPlaying, setNowPlaying] = useState<Movie[]>([])
-  const [popular, setPopular] = useState<Movie[]>([])
-  const [heroLoad, setHeroLoad] = useState(true)
-  const [gridLoad, setGridLoad] = useState(true)
-  const [heroIdx, setHeroIdx] = useState(0)
-  const [heroIn, setHeroIn] = useState(true)
-  const [popPage, setPopPage] = useState(1)
-  const [hasMore, setHasMore] = useState(true)
-  const [busy, setBusy] = useState(false)
-  const [showFeed, setShowFeed] = useState(false)
+  const [popular,    setPopular]    = useState<Movie[]>([])
+  const [heroLoad,   setHeroLoad]   = useState(true)
+  const [gridLoad,   setGridLoad]   = useState(true)
+  const [heroIdx,    setHeroIdx]    = useState(0)
+  // Hero: what's hot right now (popularity + momentum + this server), re-ranked for the profile
+  const [hotHero,    setHotHero]    = useState<(Movie & { media_type?: 'movie' | 'tv'; reason?: string })[]>([])
+  const heroProfileId = useProfileStore(s => s.activeProfile?._id)
+  useEffect(() => {
+    const url = heroProfileId ? `/profiles/${heroProfileId}/new-hot` : '/movies/new-hot'
+    api.get(url).then(r => setHotHero((r.data.everyone || []).filter((m: Movie) => m.backdrop_path).slice(0, 6))).catch(() => setHotHero([]))
+  }, [heroProfileId])
+  const heroList = hotHero.length ? hotHero : trending
+  const [heroIn,     setHeroIn]     = useState(true)
+  const [popPage,    setPopPage]    = useState(1)
+  const [hasMore,    setHasMore]    = useState(true)
+  const [busy,       setBusy]       = useState(false)
+  const [showFeed,   setShowFeed]   = useState(false)
+  const [error,      setError]      = useState(false)
 
   const timer = useRef<ReturnType<typeof setInterval>>()
 
-  
-
-  // Kids redirect
- // Replace the old kids redirect with this
-// In Home.tsx, replace the kids redirect useEffect with this
-useEffect(() => {
-  if (activeProfile?.isKids && window.location.pathname !== '/kids') {
-    navigate('/kids', { replace: true });
-  }
-}, [activeProfile?.isKids, navigate]);
-  // Initial data fetch
   useEffect(() => {
     setHeroLoad(true)
     Promise.all([
@@ -68,226 +99,205 @@ useEffect(() => {
       api.get('/movies/now-playing'),
     ])
       .then(([t, r, u, n]) => {
-        setTrending(t.data.results || [])
+        setTrending((t.data.results || []).filter((m: Movie) => m.backdrop_path))
         setTopRated(r.data.results || [])
         setUpcoming(u.data.results || [])
         setNowPlaying(n.data.results || [])
       })
-      .catch(console.error)
+      .catch(() => setError(true))
       .finally(() => setHeroLoad(false))
   }, [])
 
   // Hero auto-rotate
   useEffect(() => {
-    if (!trending.length) return
+    if (!heroList.length) return
     timer.current = setInterval(() => {
       setHeroIn(false)
-      setTimeout(() => {
-        setHeroIdx((i) => (i + 1) % Math.min(trending.length, 6))
-        setHeroIn(true)
-      }, 300)
-    }, 6000)
+      setTimeout(() => { setHeroIdx(i => (i + 1) % Math.min(heroList.length, 6)); setHeroIn(true) }, 300)
+    }, 7000)
     return () => clearInterval(timer.current)
-  }, [trending.length])
+  }, [heroList.length])
 
-  // Popular grid with infinite scroll
   const fetchPopular = useCallback(async (pg: number) => {
     pg === 1 ? setGridLoad(true) : setBusy(true)
     try {
       const { data } = await api.get('/movies/popular', { params: { page: pg } })
-      const results = data.results || []
-      pg === 1 ? setPopular(results) : setPopular((prev) => [...prev, ...results])
+      const results: Movie[] = data.results || []
+      setPopular(prev => {
+        if (pg === 1) return results
+        const seen = new Set(prev.map(m => m.id))
+        return [...prev, ...results.filter(m => !seen.has(m.id))]
+      })
       setPopPage(pg)
       setHasMore(pg < Math.min(data.total_pages || 1, 15))
     } catch (e) {
       console.error(e)
+      setHasMore(false)
     } finally {
-      setGridLoad(false)
-      setBusy(false)
+      setGridLoad(false); setBusy(false)
     }
   }, [])
 
-  useEffect(() => {
-    fetchPopular(1)
-  }, [fetchPopular])
+  useEffect(() => { fetchPopular(1) }, [fetchPopular])
 
-  const loadMore = useCallback(() => {
-    if (!busy && hasMore) fetchPopular(popPage + 1)
-  }, [busy, hasMore, popPage, fetchPopular])
-
+  const loadMore = useCallback(() => { if (!busy && hasMore) fetchPopular(popPage + 1) }, [busy, hasMore, popPage, fetchPopular])
   const sentinel = useInfiniteScroll(loadMore, hasMore && !busy && !gridLoad)
 
   const changeHero = (idx: number) => {
     clearInterval(timer.current)
     setHeroIn(false)
-    setTimeout(() => {
-      setHeroIdx(idx)
-      setHeroIn(true)
-    }, 200)
+    setTimeout(() => { setHeroIdx(idx); setHeroIn(true) }, 200)
   }
 
-  const hero = trending[heroIdx]
+  const hero = heroList[heroIdx] as (Movie & { media_type?: 'movie' | 'tv'; reason?: string; first_air_date?: string }) | undefined
+  const heroType: 'movie' | 'tv' = hero?.media_type === 'tv' ? 'tv' : 'movie'
+  const heroSaved = hero ? isIn(hero.id) : false
 
   if (showFeed) return <VerticalFeed onClose={() => setShowFeed(false)} />
 
   return (
     <div className="min-h-screen">
-
-      {/* ── Hero banner ── */}
+      {/* ── Hero spotlight ── */}
       {heroLoad ? (
-        <div className="skeleton" style={{ height: 'clamp(280px,55vw,560px)' }} />
+        <div className="skeleton rounded-none" style={{ height: 'clamp(460px, 62vw, 720px)' }} />
       ) : hero ? (
-        <div className="relative overflow-hidden select-none" style={{ height: 'clamp(280px,55vw,560px)' }}>
-          <img
-            key={hero.id}
-            src={BD(hero.backdrop_path)}
-            alt={hero.title || ''}
-            className={`absolute inset-0 w-full h-full object-cover object-top transition-opacity duration-500 ${heroIn ? 'opacity-100' : 'opacity-0'}`}
-          />
-          <div className="absolute inset-0 bg-gradient-to-r from-[#07080c]/90 via-[#07080c]/40 to-transparent" />
-          <div className="absolute inset-0" style={{ background: 'linear-gradient(to top,#07080c 0%,transparent 45%)' }} />
+        <section className="relative overflow-hidden bg-dark-void select-none" style={{ height: 'clamp(460px, 62vw, 720px)' }}>
+          <img key={hero.id} src={BD(hero.backdrop_path)} alt=""
+            className={`absolute inset-0 w-full h-full object-cover object-top transition-opacity duration-700 ${heroIn ? 'opacity-100' : 'opacity-0'}`} />
+          <div className="absolute inset-0 bg-gradient-to-t from-dark via-dark/50 to-transparent" />
+          <div className="absolute inset-0 bg-gradient-to-r from-dark-void/90 via-dark-void/30 to-transparent" />
 
-          {/* Content */}
-          <div
-            className={`absolute bottom-10 sm:bottom-16 left-4 sm:left-8 right-4 max-w-2xl transition-all duration-500 ${heroIn ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-2'}`}
-          >
-            <div className="flex items-center gap-2 mb-3 flex-wrap">
-              <span className="text-[11px] font-bold px-3 py-1 rounded-full uppercase tracking-wider"
-                style={{ background: 'rgba(20,184,166,0.2)', border: '1px solid rgba(20,184,166,0.4)', color: '#14b8a6' }}>
-                🔥 Trending #{heroIdx + 1}
-              </span>
-              {hero.vote_average >= 7.5 && (
-                <span className="text-[11px] font-bold px-2.5 py-1 rounded-full"
-                  style={{ background: 'rgba(245,158,11,0.2)', border: '1px solid rgba(245,158,11,0.4)', color: '#f59e0b' }}>
-                  ★ {hero.vote_average.toFixed(1)}
+          <div className="absolute top-20 left-4 sm:left-6 lg:left-12 flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-dark-void/70 backdrop-blur-md">
+            <span className="w-2 h-2 rounded-full bg-brand animate-pulse shadow-[0_0_8px_#e50914]" />
+            <span className="text-tech-pill uppercase text-ink tracking-widest">{hero.reason || `Trending #${heroIdx + 1} this week`}</span>
+          </div>
+
+          <div className={`absolute bottom-10 sm:bottom-16 left-4 sm:left-6 lg:left-12 right-4 max-w-2xl flex flex-col gap-3 transition-all duration-500 ${heroIn ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-2'}`}>
+            <div className="flex flex-wrap items-center gap-2">
+              {hero.vote_average > 0 && (
+                <span className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-gold/20 text-gold text-label-sm">
+                  <Icon name="star" size={13} fill />{hero.vote_average.toFixed(1)}
                 </span>
               )}
+              {(hero.release_date || hero.first_air_date) && <span className="tech-pill">{(hero.release_date || hero.first_air_date || '').slice(0, 4)}</span>}
+              {(hero.genre_ids || []).slice(0, 2).map(g => {
+                const name = GENRES.find(x => x.id === g)?.label
+                return name ? <span key={g} className="tech-pill text-ink-muted">{name}</span> : null
+              })}
+              <span className="tech-pill text-cyan">HD</span>
             </div>
 
-            <h1 className="font-black leading-none mb-3 text-white"
-              style={{ fontFamily: 'Syne, sans-serif', fontSize: 'clamp(1.6rem,5vw,3.5rem)', textShadow: '0 2px 20px rgba(0,0,0,0.8)' }}>
+            <h1 className="font-extrabold text-white leading-[1.05] tracking-tight text-shadow"
+              style={{ fontSize: 'clamp(2rem, 5.5vw, 3.75rem)' }}>
               {hero.title || hero.name}
             </h1>
-            <p className="text-slate-300 text-sm leading-relaxed mb-5 line-clamp-2 hidden sm:block max-w-lg">
-              {hero.overview}
-            </p>
+            <p className="text-ink-muted text-sm sm:text-base leading-relaxed line-clamp-2 sm:line-clamp-3 max-w-xl">{hero.overview}</p>
 
-            <div className="flex gap-2.5 flex-wrap">
-              <button
-                onClick={() => navigate(`/player/movie/${hero.id}`)}
-                className="btn-primary px-5 sm:px-7 py-2.5 sm:py-3 text-sm sm:text-base flex items-center gap-2"
-              >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><polygon points="5,3 19,12 5,21"/></svg>
-                Play Now
+            <div className="flex items-center gap-2.5 pt-1">
+              <button onClick={() => navigate(heroType === 'tv' ? `/player/tv/${hero.id}?season=1&episode=1` : `/player/movie/${hero.id}`)} className="btn-primary h-12 px-7 text-[15px]">
+                <Icon name="play_arrow" size={24} fill /> Watch Now
               </button>
-              <button onClick={() => navigate(`/movie/${hero.id}`)} className="btn-secondary px-5 sm:px-7 py-2.5 sm:py-3 text-sm sm:text-base">
-                More Info
+              <button onClick={() => navigate(`/${heroType}/${hero.id}`)} className="btn-secondary h-12 px-5">
+                <Icon name="info" size={20} /> <span className="hidden sm:inline">More Info</span>
               </button>
               <button
-                onClick={() => setShowFeed(true)}
-                className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-white text-sm font-medium transition-all active:scale-95"
-                style={{ background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.15)' }}
-              >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
-                  <path d="M19.59 6.69a4.83 4.83 0 01-3.77-4.25V2h-3.45v13.67a2.89 2.89 0 01-2.88 2.5 2.89 2.89 0 01-2.89-2.89 2.89 2.89 0 012.89-2.89c.28 0 .54.04.79.1V9.01a6.33 6.33 0 00-.79-.05 6.34 6.34 0 00-6.34 6.34 6.34 6.34 0 006.34 6.34 6.34 6.34 0 006.33-6.34V8.69a8.18 8.18 0 004.79 1.54V6.77a4.85 4.85 0 01-1.02-.08z"/>
-                </svg>
-                For You
+                onClick={() => user
+                  ? toggle({ movieId: hero.id, title: hero.title || hero.name || '', poster: hero.poster_path || '', backdrop: hero.backdrop_path || '', rating: hero.vote_average, year: (hero.release_date || hero.first_air_date || '').slice(0, 4), type: heroType })
+                  : navigate('/login')}
+                aria-label={heroSaved ? 'Remove from My List' : 'Add to My List'}
+                className={`btn-icon w-12 h-12 ${heroSaved ? '!bg-brand !text-white !border-brand shadow-brand-sm' : ''}`}>
+                <Icon name={heroSaved ? 'check' : 'add'} size={22} />
               </button>
             </div>
           </div>
 
-          {/* Dots */}
-          <div className="absolute bottom-4 right-4 sm:right-8 flex gap-1.5 z-10">
-            {trending.slice(0, 6).map((_, i) => (
-              <button key={i} onClick={() => changeHero(i)}
-                className={`rounded-full transition-all duration-300 ${i === heroIdx ? 'w-6 h-1.5 bg-brand' : 'w-1.5 h-1.5 bg-white/30 hover:bg-white/60'}`} />
-            ))}
-          </div>
-        </div>
-      ) : null}
-
-      {/* ── Rows ── */}
-      <div className="mt-6 sm:mt-8"><ContinueWatchingRow /></div>
-      {user && <RecommendationsRow />}
-
-      {/* ── Trending Picks ── */}
-      {!heroLoad && trending.length > 0 && (
-        <section className="px-3 sm:px-6 mb-6 sm:mb-8">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="section-title">✨ Trending Picks</h2>
-            <span className="text-xs text-slate-600">Hover for preview</span>
-          </div>
-          <div
-            className="flex gap-3 sm:gap-4 overflow-x-auto scrollbar-hide pb-2 -mx-3 px-3 sm:-mx-6 sm:px-6"
-            style={{ touchAction: 'pan-y' }}
-          >
-            {trending.slice(0, 10).map((m) => (
-              <AnimatedPosterCard key={m.id} movie={m} type="movie" size="md" showTrailer />
+          <div className="absolute bottom-5 right-4 sm:right-6 lg:right-12 flex gap-1.5 z-10">
+            {heroList.slice(0, 6).map((_, i) => (
+              <button key={i} onClick={() => changeHero(i)} aria-label={`Show trending #${i + 1}`}
+                className={`rounded-full transition-all duration-300 h-1.5 ${i === heroIdx ? 'w-7 bg-brand shadow-[0_0_8px_#e50914]' : 'w-1.5 bg-white/30 hover:bg-white/60'}`} />
             ))}
           </div>
         </section>
+      ) : (
+        <div className="pt-24 px-4 sm:px-6 lg:px-12">
+          {error && (
+            <div className="card p-6 flex items-center gap-3 text-ink-muted">
+              <Icon name="cloud_off" size={24} className="text-brand" />
+              Couldn't reach the Streamix server. Is the backend running on port 5000?
+            </div>
+          )}
+        </div>
       )}
 
-      {/* ── For You Feed Button ── */}
-      <div className="mx-3 sm:mx-6 mb-6">
-        <button
-          onClick={() => setShowFeed(true)}
-          className="w-full rounded-2xl p-4 flex items-center gap-4 transition-all active:scale-[0.99]"
-          style={{
-            background: 'linear-gradient(135deg,rgba(20,184,166,0.08),rgba(20,184,166,0.03))',
-            border: '1px solid rgba(20,184,166,0.2)',
-          }}
-        >
-          <div className="w-12 h-12 rounded-2xl flex items-center justify-center flex-shrink-0"
-            style={{ background: 'rgba(20,184,166,0.15)' }}>
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="#14b8a6">
-              <path d="M19.59 6.69a4.83 4.83 0 01-3.77-4.25V2h-3.45v13.67a2.89 2.89 0 01-2.88 2.5 2.89 2.89 0 01-2.89-2.89 2.89 2.89 0 012.89-2.89c.28 0 .54.04.79.1V9.01a6.33 6.33 0 00-.79-.05 6.34 6.34 0 00-6.34 6.34 6.34 6.34 0 006.34 6.34 6.34 6.34 0 006.33-6.34V8.69a8.18 8.18 0 004.79 1.54V6.77a4.85 4.85 0 01-1.02-.08z"/>
-            </svg>
-          </div>
-          <div className="flex-1 text-left">
-            <p className="text-white font-semibold text-sm">For You Feed</p>
-            <p className="text-slate-500 text-xs">Swipeable trailers · Discover something new</p>
-          </div>
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#14b8a6" strokeWidth="2" className="flex-shrink-0">
-            <path d="m9 18 6-6-6-6"/>
-          </svg>
+      {/* ── Genre chip rail ── */}
+      <div className="flex items-center gap-2 overflow-x-auto scrollbar-hide px-4 sm:px-6 lg:px-12 py-5">
+        <button className="flex-shrink-0 px-4 py-1.5 rounded-full text-[13px] font-semibold bg-brand text-white shadow-brand-sm">All</button>
+        {GENRES.map(g => (
+          <button key={g.id} onClick={() => navigate(`/movies?genre=${g.id}`)}
+            className="flex-shrink-0 px-4 py-1.5 rounded-full text-[13px] font-semibold bg-dark-card text-ink-muted hover:text-white hover:bg-dark-border transition-colors">
+            {g.label}
+          </button>
+        ))}
+      </div>
+
+      {/* Netflix-style shuffle: start a random well-rated title right away */}
+      <div className="px-4 sm:px-6 lg:px-12 -mt-2 mb-6 flex gap-2 overflow-x-auto scrollbar-hide">
+        <button onClick={playSomething} disabled={shuffling} className="btn-secondary px-4 py-2 text-xs disabled:opacity-60 flex-shrink-0">
+          <Icon name={shuffling ? 'progress_activity' : 'shuffle'} size={18} className={shuffling ? 'animate-spin' : ''} />Play something
+        </button>
+        <button onClick={() => navigate('/new')} className="btn-secondary px-4 py-2 text-xs flex-shrink-0"><Icon name="local_fire_department" size={18} />New & Hot</button>
+        <button onClick={() => navigate('/ask')} className="btn-secondary px-4 py-2 text-xs flex-shrink-0"><Icon name="auto_awesome" size={18} />Ask Streamix</button>
+      </div>
+      {shuffleNote && <p role="status" className="px-4 sm:px-6 lg:px-12 -mt-4 mb-5 text-xs text-ink-muted truncate">{shuffleNote}</p>}
+      <ContinueWatchingRow />
+      {user && <UpcomingRow />}
+      {user && <RecommendationsRow />}
+      <LibraryRow />
+      <CollectionRows />
+
+      <Carousel title="Top 10 Trending Today" icon="local_fire_department" movies={trending.slice(0, 10)} loading={heroLoad} ranked />
+      <Carousel title="Top 10 Shows Today" icon="live_tv" movies={topTv} loading={!topTv.length} ranked accent="cyan" />
+
+      {/* ── For You feed ── */}
+      <div className="px-4 sm:px-6 lg:px-12 mb-10">
+        <button onClick={() => setShowFeed(true)}
+          className="w-full rounded-2xl p-4 sm:p-5 flex items-center gap-4 text-left glass hover:shadow-focus transition-all active:scale-[0.99]">
+          <span className="w-12 h-12 rounded-2xl flex items-center justify-center flex-shrink-0 bg-brand/15 text-brand">
+            <Icon name="smart_display" size={26} fill />
+          </span>
+          <span className="flex-1">
+            <span className="block text-white font-bold">For You feed</span>
+            <span className="block text-ink-muted text-sm">Swipe through trailers and discover something new</span>
+          </span>
+          <Icon name="chevron_right" size={24} className="text-brand" />
         </button>
       </div>
 
-      {/* ── Standard carousels ── */}
-      <Carousel title="🎬 Now Playing" movies={nowPlaying} loading={heroLoad} />
-      <Carousel title="⭐ Top Rated"   movies={topRated}   loading={heroLoad} seeAll="/movies" />
-      <Carousel title="🗓 Coming Soon" movies={upcoming}   loading={heroLoad} />
+      <Carousel title="Now Playing"  movies={nowPlaying} loading={heroLoad} />
+      <Carousel title="Top Rated"    movies={topRated}   loading={heroLoad} seeAll="/movies" accent="gold" />
+      <Carousel title="Coming Soon"  movies={upcoming}   loading={heroLoad} accent="cyan" />
 
       {/* ── Popular grid ── */}
-      <section className="px-3 sm:px-6 pb-12 mt-2">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="section-title">🌟 Popular Movies</h2>
-          {!gridLoad && <span className="text-xs text-slate-600">{popular.length} movies</span>}
-        </div>
-
-        {gridLoad ? (
-          <div className="movie-card-grid">
-            {Array.from({ length: 18 }).map((_, i) => (
-              <div key={i} className="skeleton rounded-xl" style={{ aspectRatio: '2/3' }} />
-            ))}
-          </div>
-        ) : (
-          <>
+      <section className="pb-12">
+        <RailHeader title="Popular on Streamix" accent="gold" right={!gridLoad && (
+          <span className="text-label-sm uppercase text-ink-faint">{popular.length} titles</span>
+        )} />
+        <div className="px-4 sm:px-6 lg:px-12">
+          {gridLoad ? (
             <div className="movie-card-grid">
-              {popular.map(m => <MovieCard key={m.id} movie={m as any} />)}
+              {Array.from({ length: 12 }).map((_, i) => <div key={i} className="skeleton" style={{ aspectRatio: '2/3.6' }} />)}
             </div>
-            <div ref={sentinel} className="h-4 mt-4" />
-            {busy && (
-              <div className="flex justify-center py-8">
-                <div className="w-7 h-7 border-2 border-dark-border border-t-brand rounded-full animate-spin" />
+          ) : (
+            <>
+              <div className="movie-card-grid">
+                {popular.map(m => <MovieCard key={m.id} movie={m} type="movie" />)}
               </div>
-            )}
-            {!hasMore && popular.length > 0 && (
-              <p className="text-center text-xs text-slate-700 py-8">— End of list —</p>
-            )}
-          </>
-        )}
+              <div ref={sentinel} className="h-4 mt-4" />
+              {busy && <div className="flex justify-center py-8"><div className="w-7 h-7 border-2 border-white/10 border-t-brand rounded-full animate-spin" /></div>}
+              {!hasMore && popular.length > 0 && <p className="text-center text-xs text-ink-faint py-8">You've reached the end</p>}
+            </>
+          )}
+        </div>
       </section>
     </div>
   )

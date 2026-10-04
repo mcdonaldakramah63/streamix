@@ -15,22 +15,19 @@ export interface StreamResult {
   sources:   HLSSource[]
   subtitles: { url: string; lang: string; label: string }[]
   provider:  'hls' | 'iframe'
+  /** Seconds, when the anime source knows them */
+  markers?:  { introStart: number | null; introEnd: number | null; creditsStart: number | null }
 }
 
-const BACKEND = (import.meta.env.VITE_API_URL || 'https://streamix-production-1cb4.up.railway.app/api')
-  .replace('/api', '')
-
-function proxyUrl(rawUrl: string): string {
-  if (!rawUrl) return rawUrl
-  return `${BACKEND}/api/stream/proxy?url=${encodeURIComponent(rawUrl)}`
-}
+// The server returns signed same-origin proxy links (`proxied`); the proxy refuses anything else
+const proxiedOf = (item: any, raw: string) => item?.proxied || raw
 
 // Test if a proxied m3u8 URL is actually accessible (not 403/404)
-async function testSource(rawUrl: string): Promise<boolean> {
+async function testSource(url: string): Promise<boolean> {
   try {
     const controller = new AbortController()
     const timeout = setTimeout(() => controller.abort(), 4000)
-    const res = await fetch(proxyUrl(rawUrl), { method: 'HEAD', signal: controller.signal })
+    const res = await fetch(url, { method: 'HEAD', signal: controller.signal })
     clearTimeout(timeout)
     return res.ok
   } catch {
@@ -123,7 +120,7 @@ export function useConsumet() {
           const firstRaw = rawSources[0].url
           console.log(`[Anime] Testing ${server}/${category}:`, firstRaw.slice(0, 60))
 
-          const works = await testSource(firstRaw)
+          const works = await testSource(proxiedOf(rawSources[0], firstRaw))
           if (!works) {
             console.log(`[Anime] ${server}/${category} → blocked, trying next`)
             continue
@@ -132,7 +129,7 @@ export function useConsumet() {
           console.log(`[Anime] ✅ ${server}/${category} works!`)
 
           const sources: HLSSource[] = rawSources.map((s: any) => ({
-            url:     proxyUrl(s.url),
+            url:     proxiedOf(s, s.url),
             quality: s.quality || 'Auto',
             isM3U8:  true,
           }))
@@ -140,12 +137,18 @@ export function useConsumet() {
           const subtitles = (r.data?.tracks || [])
             .filter((t: any) => t.kind === 'captions' || t.kind === 'subtitles')
             .map((t: any) => ({
-              url:   t.file,
+              url:   proxiedOf(t, t.file),
               lang:  t.label?.toLowerCase().includes('english') ? 'en' : (t.label || 'en'),
               label: t.label || 'English',
             }))
 
-          return { sources, subtitles, provider: 'hls' }
+          const intro = r.data?.intro, outro = r.data?.outro
+          const markers = {
+            introStart: intro?.end > 0 ? Number(intro.start) || 0 : null,
+            introEnd: intro?.end > 0 ? Number(intro.end) : null,
+            creditsStart: outro?.start > 0 ? Number(outro.start) : null,
+          }
+          return { sources, subtitles, provider: 'hls', markers }
 
         } catch (e: any) {
           const status = e?.response?.status || 0

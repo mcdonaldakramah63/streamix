@@ -1,43 +1,60 @@
 /** @type {import('tailwindcss').Config} */
+// Design tokens from the Stitch "Movie Stream Tracker" project — Obsidian Cinema system
 export default {
   content: ['./index.html', './src/**/*.{js,ts,jsx,tsx}'],
   theme: {
     extend: {
       fontFamily: {
-        display: ['Syne', 'sans-serif'],
-        body:    ['DM Sans', 'sans-serif'],
-        sans:    ['DM Sans', 'sans-serif'],
+        display: ['"Plus Jakarta Sans"', 'system-ui', 'sans-serif'],
+        body:    ['"Plus Jakarta Sans"', 'system-ui', 'sans-serif'],
+        sans:    ['"Plus Jakarta Sans"', 'system-ui', 'sans-serif'],
       },
       colors: {
-        // Deep cinematic dark palette
+        // Obsidian surfaces
         dark: {
-          DEFAULT: '#07080c',
-          surface: '#0e1018',
-          card:    '#13161f',
-          border:  '#1e2235',
-          hover:   '#1a1e2e',
+          DEFAULT: '#0f131c',  // surface
+          void:    '#0a0e17',  // surface-container-lowest
+          surface: '#181b25',  // surface-container-low
+          card:    '#1c2029',  // surface-container
+          border:  '#262a34',  // surface-container-high
+          hover:   '#262a34',
+          high:    '#31353f',  // surface-container-highest
         },
+        // Neon scarlet — playback, primary actions, progress
+        // Follows the profile's theme (CSS variables set in src/utils/theme.ts; scarlet by default)
         brand: {
-          DEFAULT: '#14b8a6',
-          dark:    '#0d9488',
-          light:   '#2dd4bf',
-          glow:    'rgba(20,184,166,0.15)',
+          DEFAULT: 'rgb(var(--brand) / <alpha-value>)',
+          dark:    'rgb(var(--brand-dark) / <alpha-value>)',
+          light:   'rgb(var(--brand-light) / <alpha-value>)',
+          soft:    'rgb(var(--brand-soft) / <alpha-value>)',
+          glow:    'rgb(var(--brand) / 0.15)',
         },
-        // Premium accent
+        // Cinema gold — ratings, curation
         gold: '#f59e0b',
+        // Ion cyan — downloads, telemetry, codec badges
+        cyan: { DEFAULT: '#4cd7f6', deep: '#06b6d4' },
+        ink: {
+          DEFAULT: '#dfe2ef',  // on-surface
+          muted:   '#94a3b8',
+          faint:   '#64748b',
+        },
+      },
+      fontSize: {
+        'tech-pill': ['10px', { lineHeight: '12px', letterSpacing: '0.08em', fontWeight: '800' }],
+        'label-sm':  ['11px', { lineHeight: '14px', letterSpacing: '0.06em', fontWeight: '700' }],
       },
       backgroundImage: {
-        'gradient-radial':  'radial-gradient(var(--tw-gradient-stops))',
-        'gradient-conic':   'conic-gradient(from 180deg at 50% 50%, var(--tw-gradient-stops))',
-        'card-gradient':    'linear-gradient(180deg, transparent 40%, rgba(7,8,12,0.97) 100%)',
-        'hero-gradient':    'linear-gradient(to right, rgba(7,8,12,0.98) 0%, rgba(7,8,12,0.7) 50%, rgba(7,8,12,0.15) 100%)',
-        'hero-bottom':      'linear-gradient(to top, rgba(7,8,12,1) 0%, transparent 60%)',
+        'hero-gradient': 'linear-gradient(to right, rgba(10,14,23,0.95) 0%, rgba(10,14,23,0.6) 50%, rgba(10,14,23,0.1) 100%)',
+        'hero-bottom':   'linear-gradient(to top, #0f131c 0%, transparent 60%)',
+        'brand-grad':    'linear-gradient(135deg, rgb(var(--brand-light)) 0%, rgb(var(--brand)) 50%, #f59e0b 100%)',
       },
       boxShadow: {
-        'brand':   '0 0 30px rgba(20,184,166,0.2)',
-        'brand-sm':'0 0 12px rgba(20,184,166,0.15)',
-        'card':    '0 4px 24px rgba(0,0,0,0.5)',
-        'deep':    '0 8px 48px rgba(0,0,0,0.7)',
+        'brand':    '0 0 24px rgb(var(--brand) / 0.45)',
+        'brand-sm': '0 0 12px rgb(var(--brand) / 0.35)',
+        'cyan':     '0 0 16px rgba(6,182,212,0.4)',
+        'card':     '0 4px 24px rgba(0,0,0,0.5)',
+        'deep':     '0 12px 32px -8px rgba(0,0,0,0.8)',
+        'focus':    '0 12px 32px -8px rgba(0,0,0,0.8), 0 0 24px -2px rgb(var(--brand) / 0.35)',
       },
       animation: {
         'fade-in':    'fadeIn 0.4s ease-out',
@@ -45,10 +62,9 @@ export default {
         'slide-down': 'slideDown 0.3s ease-out',
         'scale-in':   'scaleIn 0.2s ease-out',
         'shimmer':    'shimmer 1.8s infinite',
-        'glow-pulse': 'glowPulse 2s ease-in-out infinite',
       },
       keyframes: {
-        fadeIn:    { from: { opacity: '0' },                      to: { opacity: '1' } },
+        fadeIn:    { from: { opacity: '0' }, to: { opacity: '1' } },
         slideUp:   { from: { opacity: '0', transform: 'translateY(16px)' }, to: { opacity: '1', transform: 'translateY(0)' } },
         slideDown: { from: { opacity: '0', transform: 'translateY(-10px)' }, to: { opacity: '1', transform: 'translateY(0)' } },
         scaleIn:   { from: { opacity: '0', transform: 'scale(0.95)' }, to: { opacity: '1', transform: 'scale(1)' } },
@@ -56,16 +72,12 @@ export default {
           '0%':   { backgroundPosition: '-1000px 0' },
           '100%': { backgroundPosition: '1000px 0' },
         },
-        glowPulse: {
-          '0%, 100%': { boxShadow: '0 0 20px rgba(20,184,166,0.1)' },
-          '50%':      { boxShadow: '0 0 40px rgba(20,184,166,0.3)' },
-        },
-      },
-      transitionTimingFunction: {
-        'spring': 'cubic-bezier(0.34, 1.56, 0.64, 1)',
-        'smooth': 'cubic-bezier(0.4, 0, 0.2, 1)',
       },
     },
   },
-  plugins: [],
+  plugins: [
+    // phoneland: phones held sideways (short landscape screens) → video-first layouts.
+    // A variant, not a screen: a raw screen would switch off Tailwind's max-* breakpoint variants.
+    ({ addVariant }) => addVariant('phoneland', '@media (orientation: landscape) and (max-height: 500px)'),
+  ],
 }

@@ -1,71 +1,38 @@
-// frontend/src/stores/downloadStore.ts — NEW FILE
-// Offline downloads using Dexie.js (IndexedDB wrapper)
-// Works for: HLS anime streams + any direct video URL
-// Does NOT work for: VidSrc/embed iframes (third-party, no access)
-// Auto-expire: 30 days after download, 48h after first play
+// frontend/src/stores/downloadStore.ts — offline downloads in IndexedDB (Dexie)
+// HLS streams: every segment (+ encryption keys / init segments) is stored, and a local
+// playlist pointing at blob: URLs is rebuilt at playback time. Direct MP4s are stored whole.
+// Embed/iframe sources can't be downloaded.
 import Dexie, { Table } from 'dexie'
 import { create } from 'zustand'
 
-// ── Types ─────────────────────────────────────────────────────────────────────
-export type DownloadStatus = 'queued' | 'downloading' | 'complete' | 'error' | 'expired'
+export type DownloadStatus = 'queued' | 'downloading' | 'complete' | 'error'
+export type Quality = '480p' | '720p' | '1080p'
 
 export interface DownloadItem {
-  id?:          number         // auto-increment
-  movieId:      number
-  title:        string
-  poster:       string
-  type:         'movie' | 'tv'
-  season?:      number
-  episode?:     number
-  episodeName?: string
-  quality:      '480p' | '720p' | '1080p'
-  status:       DownloadStatus
-  progress:     number         // 0-100
-  sizeBytes:    number
-  downloadedAt: number         // timestamp
-  expiresAt:    number         // timestamp
-  firstPlayedAt?:number        // set when user starts watching offline
-  blob?:        Blob           // the actual video data
-  errorMsg?:    string
+  id?:            number
+  key:            string            // movie: "123", episode: "123-s1e2"
+  movieId:        number
+  title:          string
+  poster:         string
+  type:           'movie' | 'tv'
+  season?:        number
+  episode?:       number
+  episodeName?:   string
+  quality:        Quality
+  format?:        'hls' | 'mp4'
+  playlist?:      string            // media playlist with __PART_n__ placeholders
+  status:         DownloadStatus
+  progress:       number            // 0-100
+  sizeBytes:      number
+  downloadedAt:   number
+  expiresAt:      number
+  firstPlayedAt?: number
+  errorMsg?:      string
 }
 
-export interface StorageInfo {
-  used:    number  // bytes
-  quota:   number  // bytes
-  percent: number
-}
+interface Part { id?: number; downloadKey: string; index: number; blob: Blob }
 
-// ── Dexie database ─────────────────────────────────────────────────────────────
-class StreamixDB extends Dexie {
-  downloads!: Table<DownloadItem, number>
-
-  constructor() {
-    super('StreamixOffline')
-    this.version(1).stores({
-      downloads: '++id, movieId, status, expiresAt, downloadedAt',
-    })
-  }
-}
-
-const db = new StreamixDB()
-
-// ── Store ─────────────────────────────────────────────────────────────────────
-interface DownloadState {
-  downloads:   DownloadItem[]
-  storageInfo: StorageInfo | null
-  loading:     boolean
-
-  init:             () => Promise<void>
-  startDownload:    (params: StartDownloadParams) => Promise<void>
-  cancelDownload:   (movieId: number) => Promise<void>
-  deleteDownload:   (movieId: number) => Promise<void>
-  getBlob:          (movieId: number) => Promise<Blob | null>
-  refreshStorage:   () => Promise<void>
-  purgeExpired:     () => Promise<void>
-  isDownloaded:     (movieId: number) => boolean
-  getDownload:      (movieId: number) => DownloadItem | undefined
-  markPlayed:       (movieId: number) => Promise<void>
-}
+export interface StorageInfo { used: number; quota: number; percent: number }
 
 export interface StartDownloadParams {
   movieId:      number
@@ -75,213 +42,274 @@ export interface StartDownloadParams {
   season?:      number
   episode?:     number
   episodeName?: string
-  streamUrl:    string         // direct URL (HLS m3u8 or MP4)
-  quality?:     '480p' | '720p' | '1080p'
+  streamUrl:    string   // HLS playlist (proxied) or direct MP4
+  quality?:     Quality
 }
 
-// Active download controllers (to allow cancel)
-const activeControllers = new Map<number, AbortController>()
+export interface Playback { url: string; format: 'hls' | 'mp4'; item: DownloadItem; release: () => void }
 
-const THIRTY_DAYS = 30 * 24 * 60 * 60 * 1000
+class StreamixDB extends Dexie {
+  downloads!: Table<DownloadItem, number>
+  parts!:     Table<Part, number>
+  constructor() {
+    super('StreamixOffline')
+    this.version(1).stores({ downloads: '++id, movieId, status, expiresAt, downloadedAt' })
+    // v2: per-episode keys + segment storage. v1 records only held a playlist file, so drop them.
+    this.version(2).stores({
+      downloads: '++id, &key, movieId, status, expiresAt, downloadedAt',
+      parts:     '++id, downloadKey, [downloadKey+index]',
+    }).upgrade(tx => tx.table('downloads').clear())
+  }
+}
+const db = new StreamixDB()
+
+export const downloadKey = (movieId: number, season?: number, episode?: number) =>
+  season != null && episode != null ? `${movieId}-s${season}e${episode}` : String(movieId)
+
+const THIRTY_DAYS       = 30 * 24 * 60 * 60 * 1000
 const FORTY_EIGHT_HOURS = 48 * 60 * 60 * 1000
+const CONCURRENCY       = 4
+const controllers = new Map<string, AbortController>()
 
-export const useDownloadStore = create<DownloadState>((set, get) => ({
-  downloads:   [],
-  storageInfo: null,
-  loading:     false,
+// ── HLS helpers ───────────────────────────────────────────────────────────────
+const absolute = (ref: string, base: string) => new URL(ref, new URL(base, window.location.href)).toString()
 
-  // ── Init — load from IndexedDB + purge expired ──────────────────────────
-  init: async () => {
-    set({ loading: true })
-    try {
-      await get().purgeExpired()
-      const all = await db.downloads.toArray()
-      set({ downloads: all })
-    } catch (e) {
-      console.error('[DL] init failed:', e)
-    } finally {
-      set({ loading: false })
-    }
-    get().refreshStorage()
-  },
+async function fetchText(url: string, signal: AbortSignal) {
+  const r = await fetch(url, { signal })
+  if (!r.ok) throw new Error(`Playlist HTTP ${r.status}`)
+  return r.text()
+}
 
-  // ── Start downloading a video ─────────────────────────────────────────────
-  startDownload: async ({
-    movieId, title, poster, type, season, episode, episodeName,
-    streamUrl, quality = '720p',
-  }) => {
-    const existing = get().getDownload(movieId)
-    if (existing?.status === 'downloading' || existing?.status === 'complete') return
+async function fetchBlob(url: string, signal: AbortSignal) {
+  const r = await fetch(url, { signal })
+  if (!r.ok) throw new Error(`Segment HTTP ${r.status}`)
+  return r.blob()
+}
 
-    const controller = new AbortController()
-    activeControllers.set(movieId, controller)
+/** Picks the variant closest to (but not above) the wanted height from a master playlist */
+function pickVariant(master: string, base: string, quality: Quality): string {
+  const want = parseInt(quality)
+  const lines = master.split(/\r?\n/)
+  const variants: { height: number; bw: number; url: string }[] = []
+  for (let i = 0; i < lines.length; i++) {
+    if (!lines[i].startsWith('#EXT-X-STREAM-INF')) continue
+    const height = Number(/RESOLUTION=\d+x(\d+)/.exec(lines[i])?.[1] || 0)
+    const bw     = Number(/BANDWIDTH=(\d+)/.exec(lines[i])?.[1] || 0)
+    const uri = lines.slice(i + 1).find(l => l.trim() && !l.startsWith('#'))
+    if (uri) variants.push({ height, bw, url: absolute(uri.trim(), base) })
+  }
+  if (!variants.length) throw new Error('No variants in playlist')
+  const fit = variants.filter(v => !v.height || v.height <= want).sort((a, b) => b.height - a.height || b.bw - a.bw)
+  return (fit[0] || variants.sort((a, b) => a.height - b.height)[0]).url
+}
 
-    const entry: DownloadItem = {
-      movieId, title, poster, type, season, episode, episodeName, quality,
-      status:      'queued',
-      progress:    0,
-      sizeBytes:   0,
-      downloadedAt:Date.now(),
-      expiresAt:   Date.now() + THIRTY_DAYS,
-    }
+// ── Store ─────────────────────────────────────────────────────────────────────
+interface DownloadState {
+  downloads:   DownloadItem[]
+  storageInfo: StorageInfo | null
+  loading:     boolean
+  init:           () => Promise<void>
+  startDownload:  (p: StartDownloadParams) => Promise<void>
+  cancelDownload: (key: string) => Promise<void>
+  deleteDownload: (key: string) => Promise<void>
+  getPlayback:    (key: string) => Promise<Playback | null>
+  refreshStorage: () => Promise<void>
+  purgeExpired:   () => Promise<void>
+  getDownload:    (key: string) => DownloadItem | undefined
+}
 
-    // Save initial record
-    const dbId = await db.downloads.add(entry)
-    const withId = { ...entry, id: dbId }
+async function removeRecord(key: string) {
+  await db.transaction('rw', db.downloads, db.parts, async () => {
+    await db.parts.where('downloadKey').equals(key).delete()
+    await db.downloads.where('key').equals(key).delete()
+  })
+}
 
-    set(s => ({
-      downloads: [...s.downloads.filter(d => d.movieId !== movieId), withId]
-    }))
+let initPromise: Promise<void> | null = null
 
-    const updateProgress = (progress: number, sizeBytes = 0) => {
-      set(s => ({
-        downloads: s.downloads.map(d =>
-          d.movieId === movieId
-            ? { ...d, status: 'downloading', progress, sizeBytes }
-            : d
-        )
-      }))
-      db.downloads.update(dbId, { status: 'downloading', progress, sizeBytes })
-    }
+export const useDownloadStore = create<DownloadState>((set, get) => {
+  const patch = (key: string, changes: Partial<DownloadItem>) => {
+    set(s => ({ downloads: s.downloads.map(d => (d.key === key ? { ...d, ...changes } : d)) }))
+    db.downloads.where('key').equals(key).modify(changes).catch(() => {})
+  }
 
-    try {
-      updateProgress(0)
+  return {
+    downloads:   [],
+    storageInfo: null,
+    loading:     false,
 
-      // Fetch the video
-      const response = await fetch(streamUrl, { signal: controller.signal })
-      if (!response.ok) throw new Error(`HTTP ${response.status}`)
-
-      const contentLength = response.headers.get('content-length')
-      const total = contentLength ? parseInt(contentLength, 10) : 0
-
-      // Stream with progress tracking
-      const reader  = response.body?.getReader()
-      const chunks: Uint8Array[] = []
-      let received  = 0
-
-      if (!reader) throw new Error('No response body')
-
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-        chunks.push(value)
-        received += value.length
-        if (total > 0) updateProgress(Math.round(received / total * 90), received)
+    init: () => {
+      if (!initPromise) {
+        initPromise = (async () => {
+          set({ loading: true })
+          try {
+            await get().purgeExpired()
+            const all = await db.downloads.toArray()
+            // Anything still "downloading" was interrupted by a page reload
+            for (const d of all) {
+              if (d.status === 'downloading' || d.status === 'queued') {
+                d.status = 'error'; d.errorMsg = 'Interrupted — retry'
+                await db.downloads.update(d.id!, { status: 'error', errorMsg: d.errorMsg })
+              }
+            }
+            set({ downloads: all })
+          } catch (e) {
+            console.error('[DL] init failed:', e)
+          } finally {
+            set({ loading: false })
+          }
+          get().refreshStorage()
+        })()
       }
+      return initPromise
+    },
 
-      updateProgress(95, received)
+    startDownload: async (p) => {
+      await get().init()
+      const key = downloadKey(p.movieId, p.type === 'tv' ? p.season : undefined, p.type === 'tv' ? p.episode : undefined)
+      const existing = get().getDownload(key)
+      if (existing?.status === 'downloading' || existing?.status === 'complete') return
+      if (existing) await removeRecord(key)
 
-      // Detect MIME type
-      const ext = streamUrl.split('.').pop()?.toLowerCase()
-      const mime = ext === 'mp4' ? 'video/mp4' : ext === 'm3u8' ? 'application/vnd.apple.mpegurl' : 'video/mp4'
-      const blob = new Blob(chunks, { type: mime })
+      const controller = new AbortController()
+      controllers.set(key, controller)
+      const { signal } = controller
 
-      // Save blob to DB
-      await db.downloads.update(dbId, {
-        status:      'complete',
-        progress:    100,
-        sizeBytes:   blob.size,
-        blob,
-        downloadedAt:Date.now(),
-        expiresAt:   Date.now() + THIRTY_DAYS,
-      })
-
-      set(s => ({
-        downloads: s.downloads.map(d =>
-          d.movieId === movieId
-            ? { ...d, status: 'complete', progress: 100, sizeBytes: blob.size, blob }
-            : d
-        )
-      }))
-
-    } catch (err: any) {
-      if (err?.name === 'AbortError') {
-        await db.downloads.delete(dbId)
-        set(s => ({ downloads: s.downloads.filter(d => d.movieId !== movieId) }))
-      } else {
-        const msg = err?.message || 'Unknown error'
-        await db.downloads.update(dbId, { status: 'error', errorMsg: msg })
-        set(s => ({
-          downloads: s.downloads.map(d =>
-            d.movieId === movieId ? { ...d, status: 'error', errorMsg: msg } : d
-          )
-        }))
+      const entry: DownloadItem = {
+        key, movieId: p.movieId, title: p.title, poster: p.poster, type: p.type,
+        season: p.season, episode: p.episode, episodeName: p.episodeName,
+        quality: p.quality || '720p', status: 'downloading', progress: 0, sizeBytes: 0,
+        downloadedAt: Date.now(), expiresAt: Date.now() + THIRTY_DAYS,
       }
-    } finally {
-      activeControllers.delete(movieId)
+      entry.id = await db.downloads.add(entry)
+      set(s => ({ downloads: [...s.downloads.filter(d => d.key !== key), entry] }))
+
+      try {
+        const head = await fetch(p.streamUrl, { signal })
+        if (!head.ok) throw new Error(`HTTP ${head.status}`)
+        const ct = head.headers.get('content-type') || ''
+        const isHls = ct.includes('mpegurl') || /\.m3u8(\?|$)/i.test(p.streamUrl) || p.streamUrl.includes('%2Em3u8') || p.streamUrl.includes('.m3u8')
+
+        if (!isHls) {
+          // Direct file
+          const blob = await head.blob()
+          await db.parts.add({ downloadKey: key, index: 0, blob })
+          patch(key, { status: 'complete', progress: 100, sizeBytes: blob.size, format: 'mp4' })
+          return
+        }
+
+        // Resolve master → media playlist
+        let playlistUrl = p.streamUrl
+        let text = await head.text()
+        if (text.includes('#EXT-X-STREAM-INF')) {
+          playlistUrl = pickVariant(text, p.streamUrl, entry.quality)
+          text = await fetchText(playlistUrl, signal)
+        }
+
+        // Collect every resource the playlist references and swap them for placeholders
+        const urls: string[] = []
+        const lines = text.split(/\r?\n/).map(line => {
+          const t = line.trim()
+          if (!t) return line
+          if (t.startsWith('#')) {
+            return line.replace(/URI="([^"]+)"/g, (_m, uri) => {
+              urls.push(absolute(uri, playlistUrl))
+              return `URI="__PART_${urls.length - 1}__"`
+            })
+          }
+          urls.push(absolute(t, playlistUrl))
+          return `__PART_${urls.length - 1}__`
+        })
+        if (!urls.length) throw new Error('Empty playlist')
+
+        let done = 0, bytes = 0, next = 0
+        const worker = async () => {
+          while (next < urls.length) {
+            const index = next++
+            const blob = await fetchBlob(urls[index], signal)
+            await db.parts.add({ downloadKey: key, index, blob })
+            done++; bytes += blob.size
+            if (done % 3 === 0 || done === urls.length) {
+              patch(key, { progress: Math.min(99, Math.round(done / urls.length * 100)), sizeBytes: bytes })
+            }
+          }
+        }
+        await Promise.all(Array.from({ length: Math.min(CONCURRENCY, urls.length) }, worker))
+
+        patch(key, { status: 'complete', progress: 100, sizeBytes: bytes, format: 'hls', playlist: lines.join('\n') })
+      } catch (err: any) {
+        if (err?.name === 'AbortError') {
+          await removeRecord(key)
+          set(s => ({ downloads: s.downloads.filter(d => d.key !== key) }))
+        } else {
+          await db.parts.where('downloadKey').equals(key).delete()
+          patch(key, { status: 'error', errorMsg: err?.message || 'Download failed', progress: 0 })
+        }
+      } finally {
+        controllers.delete(key)
+        get().refreshStorage()
+      }
+    },
+
+    cancelDownload: async (key) => {
+      controllers.get(key)?.abort()
+      controllers.delete(key)
+      await removeRecord(key)
+      set(s => ({ downloads: s.downloads.filter(d => d.key !== key) }))
+    },
+
+    deleteDownload: async (key) => {
+      controllers.get(key)?.abort()
+      await removeRecord(key)
+      set(s => ({ downloads: s.downloads.filter(d => d.key !== key) }))
       get().refreshStorage()
-    }
-  },
+    },
 
-  // ── Cancel in-progress download ────────────────────────────────────────────
-  cancelDownload: async (movieId) => {
-    activeControllers.get(movieId)?.abort()
-    activeControllers.delete(movieId)
-    const dl = get().getDownload(movieId)
-    if (dl?.id) await db.downloads.delete(dl.id)
-    set(s => ({ downloads: s.downloads.filter(d => d.movieId !== movieId) }))
-  },
+    getPlayback: async (key) => {
+      await get().init()
+      const item = await db.downloads.where('key').equals(key).first()
+      if (!item || item.status !== 'complete') return null
 
-  // ── Delete a completed download ────────────────────────────────────────────
-  deleteDownload: async (movieId) => {
-    activeControllers.get(movieId)?.abort()
-    const dl = get().getDownload(movieId)
-    if (dl?.id) await db.downloads.delete(dl.id)
-    set(s => ({ downloads: s.downloads.filter(d => d.movieId !== movieId) }))
-    get().refreshStorage()
-  },
+      // First offline play starts the 48-hour expiry window
+      if (!item.firstPlayedAt) {
+        const changes = { firstPlayedAt: Date.now(), expiresAt: Math.min(item.expiresAt, Date.now() + FORTY_EIGHT_HOURS) }
+        await db.downloads.update(item.id!, changes)
+        Object.assign(item, changes)
+        set(s => ({ downloads: s.downloads.map(d => (d.key === key ? { ...d, ...changes } : d)) }))
+      }
 
-  // ── Get the blob for offline playback ─────────────────────────────────────
-  getBlob: async (movieId) => {
-    const dl = await db.downloads.where('movieId').equals(movieId).first()
-    if (!dl?.blob) return null
-    // Mark as played → 48h expiry starts
-    if (!dl.firstPlayedAt) {
-      const newExpiry = Math.min(dl.expiresAt, Date.now() + FORTY_EIGHT_HOURS)
-      if (dl.id) await db.downloads.update(dl.id, { firstPlayedAt: Date.now(), expiresAt: newExpiry })
-    }
-    return dl.blob
-  },
+      const parts = await db.parts.where('downloadKey').equals(key).sortBy('index')
+      const objectUrls = parts.map(pt => URL.createObjectURL(pt.blob))
+      const release = () => objectUrls.forEach(u => URL.revokeObjectURL(u))
 
-  // ── Mark played ──────────────────────────────────────────────────────────
-  markPlayed: async (movieId) => {
-    const dl = get().getDownload(movieId)
-    if (!dl?.id || dl.firstPlayedAt) return
-    const newExpiry = Math.min(dl.expiresAt, Date.now() + FORTY_EIGHT_HOURS)
-    await db.downloads.update(dl.id, { firstPlayedAt: Date.now(), expiresAt: newExpiry })
-    set(s => ({
-      downloads: s.downloads.map(d =>
-        d.movieId === movieId
-          ? { ...d, firstPlayedAt: Date.now(), expiresAt: newExpiry }
-          : d
-      )
-    }))
-  },
+      if (item.format !== 'hls') {
+        if (!objectUrls[0]) return null
+        return { url: objectUrls[0], format: 'mp4', item, release }
+      }
 
-  // ── Check storage quota ────────────────────────────────────────────────────
-  refreshStorage: async () => {
-    try {
-      if (!navigator.storage?.estimate) return
-      const { usage = 0, quota = 0 } = await navigator.storage.estimate()
-      set({ storageInfo: { used: usage, quota, percent: quota > 0 ? Math.round(usage / quota * 100) : 0 } })
-    } catch { /* not supported */ }
-  },
+      const byIndex = new Map(parts.map((pt, i) => [pt.index, objectUrls[i]]))
+      const playlist = (item.playlist || '').replace(/__PART_(\d+)__/g, (_m, n) => byIndex.get(Number(n)) || '')
+      const playlistUrl = URL.createObjectURL(new Blob([playlist], { type: 'application/vnd.apple.mpegurl' }))
+      return {
+        url: playlistUrl, format: 'hls', item,
+        release: () => { release(); URL.revokeObjectURL(playlistUrl) },
+      }
+    },
 
-  // ── Purge expired downloads ─────────────────────────────────────────────
-  purgeExpired: async () => {
-    const expired = await db.downloads.where('expiresAt').below(Date.now()).toArray()
-    for (const dl of expired) {
-      if (dl.id) await db.downloads.delete(dl.id)
-    }
-    set(s => ({
-      downloads: s.downloads.filter(d => d.expiresAt > Date.now())
-    }))
-  },
+    refreshStorage: async () => {
+      try {
+        if (!navigator.storage?.estimate) return
+        const { usage = 0, quota = 0 } = await navigator.storage.estimate()
+        set({ storageInfo: { used: usage, quota, percent: quota > 0 ? Math.round(usage / quota * 100) : 0 } })
+      } catch { /* not supported */ }
+    },
 
-  // ── Helpers ───────────────────────────────────────────────────────────────
-  isDownloaded: (movieId) =>
-    get().downloads.some(d => d.movieId === movieId && d.status === 'complete'),
+    purgeExpired: async () => {
+      const expired = await db.downloads.where('expiresAt').below(Date.now()).toArray()
+      for (const d of expired) await removeRecord(d.key)
+      if (expired.length) set(s => ({ downloads: s.downloads.filter(d => d.expiresAt > Date.now()) }))
+    },
 
-  getDownload: (movieId) =>
-    get().downloads.find(d => d.movieId === movieId),
-}))
+    getDownload: (key) => get().downloads.find(d => d.key === key),
+  }
+})

@@ -2,224 +2,179 @@
 @tailwind components;
 @tailwind utilities;
 
-/* ── Google Fonts already loaded in index.html ── */
-
 @layer base {
-  :root {
-    --color-dark:         #07080c;
-    --color-surface:      #0e1018;
-    --color-card:         #13161f;
-    --color-border:       #1e2235;
-    --color-brand:        #14b8a6;
-    --color-brand-dark:   #0d9488;
-    --color-brand-glow:   rgba(20, 184, 166, 0.15);
-    --color-text:         #f1f5f9;
-    --color-muted:        #64748b;
-    --color-subtle:       #334155;
-  }
-
+  /* Accent colour — profiles can switch it (src/utils/theme.ts) */
+  :root { --brand: 229 9 20; --brand-dark: 192 0 12; --brand-light: 255 51 102; --brand-soft: 255 180 170; }
   html { scroll-behavior: smooth; }
 
   body {
-    @apply bg-dark text-slate-100 antialiased;
-    font-family: 'DM Sans', sans-serif;
-    background-color: #07080c;
+    @apply bg-dark text-ink antialiased;
+    font-family: 'Plus Jakarta Sans', system-ui, sans-serif;
+    background-color: #0f131c;
+    overscroll-behavior-y: none;
   }
 
-  /* Headings use display font */
   h1, h2, h3, h4 {
-    font-family: 'Syne', sans-serif;
+    font-family: 'Plus Jakarta Sans', system-ui, sans-serif;
+    letter-spacing: -0.015em;
   }
 
+  ::selection { background: rgb(var(--brand)); color: #fff7f6; }
   * { -webkit-tap-highlight-color: transparent; }
-
   img { @apply select-none; }
 }
 
 @layer components {
+  /* Material Symbols icon font */
+  .icon {
+    font-family: 'Material Symbols Outlined';
+    font-weight: normal;
+    font-style: normal;
+    line-height: 1;
+    letter-spacing: normal;
+    text-transform: none;
+    display: inline-block;
+    white-space: nowrap;
+    direction: ltr;
+    -webkit-font-smoothing: antialiased;
+    font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+    user-select: none;
+  }
+  .icon-fill { font-variation-settings: 'FILL' 1, 'wght' 400, 'GRAD' 0, 'opsz' 24; }
 
-  /* ── Buttons ─────────────────────────────────────────── */
+  /* ── Buttons — capsule shapes per the design system ──── */
   .btn-primary {
-    @apply inline-flex items-center justify-center gap-2
-           bg-brand text-dark font-semibold rounded-xl
-           px-5 py-2.5 text-sm
+    @apply inline-flex items-center justify-center gap-2 whitespace-nowrap
+           bg-brand text-white font-bold rounded-full
+           px-5 py-2.5 text-sm shadow-brand
            transition-all duration-200
-           hover:bg-brand-light hover:shadow-brand-sm
-           active:scale-95;
-    font-family: 'DM Sans', sans-serif;
+           hover:brightness-110 hover:scale-[1.03] hover:shadow-[0_0_32px_rgb(var(--brand)/0.6)]
+           active:scale-95 disabled:hover:scale-100;
   }
 
   .btn-secondary {
-    @apply inline-flex items-center justify-center gap-2
-           bg-dark-card border border-dark-border text-slate-300 font-medium rounded-xl
-           px-5 py-2.5 text-sm
+    @apply inline-flex items-center justify-center gap-2 whitespace-nowrap
+           bg-white/[0.08] border border-white/[0.15] text-ink font-semibold rounded-full
+           px-5 py-2.5 text-sm backdrop-blur-md
            transition-all duration-200
-           hover:border-brand/60 hover:text-white hover:bg-dark-hover
+           hover:bg-white/[0.16] hover:text-white
            active:scale-95;
-    font-family: 'DM Sans', sans-serif;
   }
 
   .btn-ghost {
-    @apply inline-flex items-center justify-center gap-2
-           text-slate-400 font-medium rounded-xl
+    @apply inline-flex items-center justify-center gap-2 whitespace-nowrap
+           text-ink-muted font-medium rounded-full
            px-4 py-2 text-sm
            transition-all duration-200
-           hover:text-white hover:bg-dark-hover
+           hover:text-white hover:bg-white/[0.06]
            active:scale-95;
   }
 
   .btn-icon {
-    @apply w-10 h-10 rounded-xl flex items-center justify-center
-           text-slate-400 border border-dark-border bg-dark-card
+    @apply w-11 h-11 rounded-full flex items-center justify-center
+           text-ink-muted bg-white/[0.06] border border-white/[0.08] backdrop-blur-md
            transition-all duration-200
-           hover:text-white hover:border-brand/50
+           hover:text-white hover:bg-white/[0.12]
            active:scale-95;
   }
 
-  /* ── Cards ───────────────────────────────────────────── */
+  /* ── Surfaces ────────────────────────────────────────── */
   .card {
-    @apply bg-dark-card border border-dark-border rounded-2xl
-           shadow-card transition-all duration-300;
+    @apply bg-dark-card rounded-2xl shadow-card transition-all duration-300;
+    border: 1px solid rgba(255,255,255,0.06);
   }
 
   .card-hover {
-    @apply card hover:border-brand/30 hover:shadow-brand-sm hover:-translate-y-0.5;
+    @apply card hover:shadow-focus hover:-translate-y-0.5;
   }
 
-  /* ── Input ───────────────────────────────────────────── */
+  .glass {
+    background: rgba(20, 26, 38, 0.72);
+    backdrop-filter: blur(20px) saturate(180%);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+  }
+
+  /* ── Input — dark glass trough ───────────────────────── */
   .input {
-    @apply w-full bg-dark-surface border border-dark-border rounded-xl
-           px-4 py-3 text-white text-sm placeholder-slate-500
-           outline-none transition-all duration-200
-           focus:border-brand/50 focus:ring-1 focus:ring-brand/20;
-    font-family: 'DM Sans', sans-serif;
-    font-size: 16px; /* Prevents iOS zoom */
+    @apply w-full rounded-xl px-4 h-12 text-white placeholder-slate-500
+           outline-none transition-all duration-200;
+    background: rgba(20, 26, 38, 0.6);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    font-size: 16px; /* prevents iOS zoom */
+  }
+  .input:focus {
+    border-color: rgb(var(--brand) / 0.8);
+    box-shadow: 0 0 0 3px rgb(var(--brand) / 0.15);
   }
 
-  /* ── Section title ───────────────────────────────────── */
   .section-title {
-    @apply text-lg sm:text-xl font-bold text-white;
-    font-family: 'Syne', sans-serif;
+    @apply text-lg sm:text-xl font-bold text-ink tracking-tight;
   }
 
-  /* ── Badge ───────────────────────────────────────────── */
+  /* ── Badges & technical pills ────────────────────────── */
   .badge {
-    @apply inline-flex items-center gap-1 px-2.5 py-0.5
-           rounded-full text-xs font-semibold;
+    @apply inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold;
+  }
+  .badge-brand { @apply badge bg-brand/20 text-brand-soft; }
+  .badge-gold  { @apply badge bg-gold/15 text-gold; }
+  .tech-pill {
+    @apply inline-flex items-center px-2 py-0.5 rounded-full text-tech-pill uppercase text-ink;
+    background: rgba(255,255,255,0.05);
+    border: 1px solid rgba(255,255,255,0.12);
   }
 
-  .badge-brand {
-    @apply badge bg-brand/15 border border-brand/30 text-brand;
-  }
-
-  .badge-gold {
-    @apply badge bg-gold/15 border border-gold/30 text-gold;
-  }
+  /* Accent bar used next to section titles */
+  .title-bar { @apply w-1.5 h-4 rounded-full bg-brand inline-block; box-shadow: 0 0 8px rgb(var(--brand)); }
 
   /* ── Skeleton loader ──────────────────────────────────── */
   .skeleton {
-    @apply rounded-xl bg-dark-card relative overflow-hidden;
-    background: linear-gradient(
-      90deg,
-      #13161f 0%,
-      #1a1e2e 40%,
-      #13161f 80%
-    );
+    @apply rounded-2xl relative overflow-hidden;
+    background: linear-gradient(90deg, #1c2029 0%, #262a34 40%, #1c2029 80%);
     background-size: 1000px 100%;
     animation: shimmer 1.8s infinite;
   }
 
-  /* ── Scrollbar hide ───────────────────────────────────── */
-  .scrollbar-hide {
-    -ms-overflow-style: none;
-    scrollbar-width: none;
-  }
+  .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
   .scrollbar-hide::-webkit-scrollbar { display: none; }
 
-  /* ── Glass effect ─────────────────────────────────────── */
-  .glass {
-    background: rgba(14, 16, 24, 0.85);
-    backdrop-filter: blur(16px);
-    -webkit-backdrop-filter: blur(16px);
-    border: 1px solid rgba(30, 34, 53, 0.8);
-  }
-
-  /* ── Gradient text ────────────────────────────────────── */
   .text-gradient {
-    background: linear-gradient(135deg, #14b8a6, #2dd4bf);
+    background: linear-gradient(135deg, rgb(var(--brand-light)), rgb(var(--brand)) 50%, #f59e0b);
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
     background-clip: text;
   }
 
-  /* ── Carousel arrow button ────────────────────────────── */
   .carousel-btn {
     @apply absolute top-1/2 -translate-y-1/2 z-10
-           w-9 h-9 rounded-full glass
+           w-10 h-10 rounded-full glass
            flex items-center justify-center
-           text-white/70 hover:text-white
+           text-white/80 hover:text-white
            transition-all duration-200
-           opacity-0 group-hover:opacity-100;
+           opacity-0;
   }
 
-  /* ── Movie card consistent sizing ────────────────────────── */
   .movie-card-grid {
-    @apply grid gap-2 sm:gap-3;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    @apply grid gap-3 sm:gap-4;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
-
-  @media (min-width: 480px) {
-    .movie-card-grid {
-      grid-template-columns: repeat(4, minmax(0, 1fr));
-    }
-  }
-
-  @media (min-width: 640px) {
-    .movie-card-grid {
-      grid-template-columns: repeat(4, minmax(0, 1fr));
-    }
-  }
-
-  @media (min-width: 768px) {
-    .movie-card-grid {
-      grid-template-columns: repeat(5, minmax(0, 1fr));
-    }
-  }
-
-  @media (min-width: 1024px) {
-    .movie-card-grid {
-      grid-template-columns: repeat(6, minmax(0, 1fr));
-    }
-  }
-
-  @media (min-width: 1280px) {
-    .movie-card-grid {
-      grid-template-columns: repeat(7, minmax(0, 1fr));
-    }
-  }
-
-  @media (min-width: 1536px) {
-    .movie-card-grid {
-      grid-template-columns: repeat(8, minmax(0, 1fr));
-    }
-  }
+  @media (min-width: 480px)  { .movie-card-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+  @media (min-width: 768px)  { .movie-card-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+  @media (min-width: 1024px) { .movie-card-grid { grid-template-columns: repeat(5, minmax(0, 1fr)); } }
+  @media (min-width: 1280px) { .movie-card-grid { grid-template-columns: repeat(6, minmax(0, 1fr)); } }
+  @media (min-width: 1536px) { .movie-card-grid { grid-template-columns: repeat(7, minmax(0, 1fr)); } }
 }
 
 @layer utilities {
-  .text-shadow { text-shadow: 0 2px 12px rgba(0,0,0,0.8); }
+  .text-shadow    { text-shadow: 0 2px 12px rgba(0,0,0,0.8); }
   .text-shadow-sm { text-shadow: 0 1px 6px rgba(0,0,0,0.6); }
   .no-scrollbar { scrollbar-width: none; }
   .no-scrollbar::-webkit-scrollbar { display: none; }
+  .pb-safe { padding-bottom: env(safe-area-inset-bottom, 0px); }
+  /* Leaves room for the floating mobile nav */
+  .pb-nav { padding-bottom: calc(5rem + env(safe-area-inset-bottom, 0px)); }
+  @media (min-width: 768px) { .pb-nav { padding-bottom: 0; } }
 }
 
-/* Global fix for horizontal carousels */
-.overflow-x-auto,
-.touch-pan-y {
-  touch-action: pan-y;
-  -ms-touch-action: pan-y; /* older Edge/IE support */
-}
-
-/* If you ever add Swiper later */
-.swiper {
-  touch-action: pan-y;
-}
+/* Horizontal rails: let the page scroll vertically while dragging sideways */
+.touch-pan-y { touch-action: pan-x pan-y; }

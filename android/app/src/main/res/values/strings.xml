@@ -1,0 +1,6 @@
+<resources>
+    <string name="app_name">Streamix</string>
+    <string name="downloads_channel">Downloads</string>
+    <string name="updates_channel">New episodes &amp; reminders</string>
+    <string name="live_channel">Connection to your server</string>
+</resources>

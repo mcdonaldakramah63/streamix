@@ -1,14 +1,16 @@
 {
-  "dependencies": {
-    "mongodb": "^7.1.0"
-  },
   "name": "streamix",
-  "version": "1.0.0",
+  "version": "2.0.0",
+  "private": true,
+  "description": "Streamix — self-hosted streaming front-end (runs locally)",
   "scripts": {
-    "start": "cd backend && node server.js",
-    "build": "cd backend && npm install"
+    "setup": "npm --prefix backend install && npm --prefix frontend install",
+    "dev": "node scripts/dev.js",
+    "build": "npm --prefix frontend run build",
+    "start": "node backend/server.js",
+    "upload": "node scripts/library-upload.js"
   },
   "engines": {
-    "node": "18.x"
+    "node": ">=18"
   }
 }

@@ -1,74 +1,79 @@
-// frontend/public/sw.js — FULL REPLACEMENT
-// Caches static app shell for instant load + offline fallback
-// Video blobs are stored in IndexedDB by downloadStore.ts (not here)
-
-const CACHE_NAME = 'streamix-v3'
+// frontend/public/sw.js — caches the app shell for fast loads + an offline fallback.
+// Downloaded videos live in IndexedDB (downloadStore.ts), not here.
+const CACHE_NAME  = 'streamix-v5'
 const OFFLINE_URL = '/offline.html'
+const PRECACHE    = ['/', '/offline.html', '/favicon.svg', '/site.webmanifest']
 
-const PRECACHE = [
-  '/',
-  '/offline.html',
-]
-
-// ── Install: precache app shell ───────────────────────────────────────────────
 self.addEventListener('install', (event) => {
-  event.waitUntil(
-    caches.open(CACHE_NAME).then(cache => cache.addAll(PRECACHE)).catch(() => {})
-  )
+  event.waitUntil(caches.open(CACHE_NAME).then(cache => cache.addAll(PRECACHE)).catch(() => {}))
   self.skipWaiting()
 })
 
-// ── Activate: clean old caches ────────────────────────────────────────────────
 self.addEventListener('activate', (event) => {
   event.waitUntil(
-    caches.keys().then(keys =>
-      Promise.all(keys.filter(k => k !== CACHE_NAME).map(k => caches.delete(k)))
-    )
+    caches.keys().then(keys => Promise.all(keys.filter(k => k !== CACHE_NAME).map(k => caches.delete(k))))
   )
   self.clients.claim()
 })
 
-// ── Fetch strategy ────────────────────────────────────────────────────────────
 self.addEventListener('fetch', (event) => {
   const { request } = event
+  if (request.method !== 'GET') return
   const url = new URL(request.url)
 
-  // ── Skip non-GET, cross-origin API calls, video streams ──────────────────
-  if (request.method !== 'GET') return
-  if (url.hostname.includes('railway.app')) return      // backend API
-  if (url.hostname.includes('tmdb.org')) return         // images — let network handle
-  if (url.pathname.includes('/stream/'))  return        // video streams
-  if (url.pathname.includes('/ws'))       return        // websockets
+  // Only handle this origin, and never API calls, stream segments or websockets
+  if (url.origin !== self.location.origin) return
+  if (url.pathname.startsWith('/api/') || url.pathname.startsWith('/ws')) return
+  if (url.protocol === 'blob:') return
 
-  // ── App shell: network-first, fall back to cache ─────────────────────────
-  if (url.origin === self.location.origin) {
+  // Navigations: network first, fall back to the cached shell, then the offline page
+  if (request.mode === 'navigate') {
     event.respondWith(
       fetch(request)
-        .then(response => {
-          if (response.ok) {
-            const clone = response.clone()
-            caches.open(CACHE_NAME).then(cache => cache.put(request, clone))
-          }
-          return response
+        .then(res => {
+          const copy = res.clone()
+          caches.open(CACHE_NAME).then(c => c.put('/', copy))
+          return res
         })
-        .catch(async () => {
-          const cached = await caches.match(request)
-          if (cached) return cached
-          // For navigation requests, return the app shell
-          if (request.mode === 'navigate') {
-            return caches.match('/') || caches.match(OFFLINE_URL) || new Response('Offline', { status: 503 })
-          }
-          return new Response('Offline', { status: 503 })
-        })
+        .catch(async () => (await caches.match('/')) || (await caches.match(OFFLINE_URL)) || new Response('Offline', { status: 503 }))
     )
     return
   }
+
+  // Static assets: network first, cache fallback
+  event.respondWith(
+    fetch(request)
+      .then(res => {
+        if (res.ok) {
+          const copy = res.clone()
+          caches.open(CACHE_NAME).then(c => c.put(request, copy))
+        }
+        return res
+      })
+      .catch(async () => (await caches.match(request)) || new Response('Offline', { status: 503 }))
+  )
 })
 
-// ── Background sync: queue failed API calls when offline ─────────────────────
-self.addEventListener('sync', (event) => {
-  if (event.tag === 'sync-watchlist') {
-    // Handled by the app when it comes back online
-    console.log('[SW] Background sync: watchlist')
-  }
+// ── Push notifications (new episodes, new library videos, weekly picks) ──────
+self.addEventListener('push', (event) => {
+  let data = {}
+  try { data = event.data ? event.data.json() : {} } catch { data = { title: 'Streamix', body: event.data && event.data.text() } }
+  event.waitUntil(self.registration.showNotification(data.title || 'Streamix', {
+    body: data.body || '',
+    icon: data.icon || '/icon-192.png',
+    badge: '/icon-64.png',
+    tag: data.tag || undefined,
+    data: { url: typeof data.url === 'string' && data.url.startsWith('/') ? data.url : '/' },
+  }))
+})
+
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close()
+  const url = (event.notification.data && event.notification.data.url) || '/'
+  event.waitUntil((async () => {
+    const tabs = await self.clients.matchAll({ type: 'window', includeUncontrolled: true })
+    const tab = tabs.find(t => new URL(t.url).origin === self.location.origin)
+    if (tab) { await tab.focus(); return tab.navigate(url) }
+    return self.clients.openWindow(url)
+  })())
 })

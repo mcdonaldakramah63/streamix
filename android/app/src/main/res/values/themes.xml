@@ -1,0 +1,13 @@
+<resources>
+    <color name="obsidian">#0F131C</color>
+    <color name="obsidian_void">#0A0E17</color>
+    <color name="icon_bg">#141A26</color>
+
+    <!-- Window theme only; all UI is drawn by Compose (see ui/theme/Theme.kt) -->
+    <style name="Theme.Streamix" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@drawable/splash_legacy</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@color/obsidian_void</item>
+        <item name="android:windowLightStatusBar">false</item>
+    </style>
+</resources>

@@ -28,6 +28,36 @@ const SORT = [
   { value: 'vote_count.desc',     label: 'Most Voted'    },
 ]
 
+/** Free, official anime published by the rights holders (Muse Asia, Ani-One, GUNDAM…), newest first */
+function OfficialRow() {
+  const navigate = useNavigate()
+  const [items, setItems] = useState<any[] | null>(null)
+  useEffect(() => { api.get('/anime/official/shows', { params: { limit: 24 } }).then(r => setItems(r.data.results || [])).catch(() => setItems([])) }, [])
+  if (!items?.length) return null
+  return (
+    <div className="mb-6 sm:mb-8">
+      <div className="flex items-baseline gap-2 px-3 sm:px-6 mb-3">
+        <h3 className="section-title">Free &amp; official</h3>
+        <span className="text-xs text-ink-faint hidden sm:inline">Full episodes from the studios’ own channels</span>
+      </div>
+      <div className="flex gap-2 sm:gap-3 overflow-x-auto scrollbar-hide px-3 sm:px-6 pb-1">
+        {items.map(a => (
+          <button key={`${a.media_type}-${a.id}`} className="flex-shrink-0 w-28 sm:w-36 text-left group"
+            onClick={() => navigate(a.media_type === 'movie' ? `/player/movie/${a.id}` : `/tv/${a.id}`)}
+            title={`${a.name || a.title} — free on ${a.officialChannel}`}>
+            <div className="relative w-full rounded-xl overflow-hidden bg-dark-card" style={{ aspectRatio: '2/3' }}>
+              {a.poster_path && <img src={PS(a.poster_path)} alt="" className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" loading="lazy" />}
+              <span className="absolute top-1.5 left-1.5 px-1.5 py-0.5 rounded-md bg-cyan text-dark-void text-[10px] font-black">FREE</span>
+            </div>
+            <p className="text-white text-xs font-semibold line-clamp-1 mt-1.5">{a.name || a.title}</p>
+            <p className="text-[10px] text-ink-faint line-clamp-1">{a.media_type === 'movie' ? 'Movie' : `${a.officialEpisodes} ep${a.officialEpisodes === 1 ? '' : 's'}`} · {a.officialChannel}</p>
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 function SectionRow({ title, anime, loading }: { title: string; anime: Movie[]; loading: boolean }) {
   const navigate = useNavigate()
   if (loading) {
@@ -52,14 +82,14 @@ function SectionRow({ title, anime, loading }: { title: string; anime: Movie[]; 
             onClick={() => navigate(`/tv/${a.id}`)}>
             <div className="relative w-full h-full rounded-xl overflow-hidden bg-dark-card">
               <img src={PS(a.poster_path)} alt={a.name||''} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" loading="lazy" />
-              <div className="absolute inset-0 bg-gradient-to-t from-[#07080c]/90 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
+              <div className="absolute inset-0 bg-gradient-to-t from-[#0f131c]/90 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
               {(a.vote_average||0) >= 8 && (
                 <div className="absolute top-1.5 left-1.5 badge-gold text-[10px] px-1.5 py-0.5">★ {a.vote_average?.toFixed(1)}</div>
               )}
               <div className="absolute bottom-0 left-0 right-0 p-2 translate-y-full group-hover:translate-y-0 transition-transform duration-300">
                 <p className="text-white text-[11px] font-semibold line-clamp-2 mb-1.5">{a.name}</p>
                 <button onClick={e => { e.stopPropagation(); navigate(`/player/tv/${a.id}?season=1&episode=1`) }}
-                  className="w-full bg-brand text-dark text-[10px] font-bold py-1.5 rounded-lg">▶ Watch</button>
+                  className="w-full bg-brand text-white text-[10px] font-bold py-1.5 rounded-lg">▶ Watch</button>
               </div>
             </div>
           </div>
@@ -163,21 +193,21 @@ export default function Anime() {
           <img src={BD(hero.backdrop_path)} alt=""
             className={`absolute inset-0 w-full h-full object-cover object-top transition-opacity duration-500 ${heroVisible?'opacity-100':'opacity-0'}`} />
           <div className="absolute inset-0 bg-hero-gradient" />
-          <div className="absolute inset-0" style={{ background:'linear-gradient(to top,#07080c 0%,transparent 50%)' }} />
+          <div className="absolute inset-0" style={{ background:'linear-gradient(to top,#0f131c 0%,transparent 50%)' }} />
 
           <div className={`absolute bottom-8 sm:bottom-14 left-4 sm:left-8 right-4 max-w-xl transition-all duration-500 ${heroVisible?'opacity-100 translate-y-0':'opacity-0 translate-y-2'}`}>
             <span className="inline-flex items-center gap-1.5 bg-rose-500/20 border border-rose-500/30 text-rose-400 text-[11px] font-bold px-3 py-1 rounded-full mb-3">
               🎌 Featured Anime
             </span>
             <h1 className="font-bold text-shadow mb-2 leading-tight"
-              style={{ fontFamily:'Syne, sans-serif', fontSize:'clamp(1.4rem,4vw,2.8rem)' }}>
+              style={{ fontFamily:'Plus Jakarta Sans, sans-serif', fontSize:'clamp(1.4rem,4vw,2.8rem)' }}>
               {hero.name}
             </h1>
-            <div className="flex items-center gap-3 mb-4 text-sm text-slate-400">
+            <div className="flex items-center gap-3 mb-4 text-sm text-ink-muted">
               {(hero.vote_average||0) >= 7 && <span className="badge-gold">★ {hero.vote_average?.toFixed(1)}</span>}
               <span>{hero.first_air_date?.slice(0,4)}</span>
             </div>
-            <p className="text-slate-300 text-sm leading-relaxed line-clamp-2 mb-5 hidden sm:block max-w-md">{hero.overview}</p>
+            <p className="text-ink text-sm leading-relaxed line-clamp-2 mb-5 hidden sm:block max-w-md">{hero.overview}</p>
             <div className="flex gap-2.5">
               <button onClick={() => navigate(`/player/tv/${hero.id}?season=1&episode=1`)} className="btn-primary px-5 py-2.5 text-sm">▶ Watch Now</button>
               <button onClick={() => navigate(`/tv/${hero.id}`)} className="btn-secondary px-5 py-2.5 text-sm">Details</button>
@@ -194,6 +224,7 @@ export default function Anime() {
       ) : null}
 
       {/* ── Carousels ── */}
+      <OfficialRow />
       <SectionRow title="🔥 Most Popular"       anime={popular}  loading={heroLoad} />
       <SectionRow title="📺 Airing This Season" anime={airing}   loading={heroLoad} />
       <SectionRow title="⭐ Top Rated"          anime={topRated} loading={heroLoad} />
@@ -204,15 +235,15 @@ export default function Anime() {
         <div className="flex flex-col sm:flex-row sm:items-center gap-3 mb-5">
           <div>
             <h2 className="section-title">🎌 Browse Anime</h2>
-            {!gridLoad && <p className="text-xs text-slate-600 mt-0.5">{anime.length}+ titles</p>}
+            {!gridLoad && <p className="text-xs text-ink-faint mt-0.5">{anime.length}+ titles</p>}
           </div>
           <div className="sm:ml-auto flex items-center gap-2.5 bg-dark-surface border border-dark-border rounded-xl px-4 py-2.5 w-full sm:max-w-xs focus-within:border-brand/40 transition-colors">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-slate-500 flex-shrink-0">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-ink-faint flex-shrink-0">
               <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
             </svg>
             <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search anime…"
               className="bg-transparent outline-none text-sm text-white placeholder-slate-500 flex-1" />
-            {search && <button onClick={() => setSearch('')} className="text-slate-500 hover:text-white text-xs">✕</button>}
+            {search && <button onClick={() => setSearch('')} className="text-ink-faint hover:text-white text-xs">✕</button>}
           </div>
         </div>
 
@@ -222,16 +253,16 @@ export default function Anime() {
               {ANIME_GENRES.map(g => (
                 <button key={g.id} onClick={() => setGenre(g.id)}
                   className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold flex-shrink-0 border transition-all whitespace-nowrap ${
-                    genre===g.id ? 'bg-brand text-dark border-brand shadow-brand-sm scale-105' : 'bg-dark-card border-dark-border text-slate-400 hover:border-brand/40 hover:text-white'
+                    genre===g.id ? 'bg-brand text-white border-brand shadow-brand-sm scale-105' : 'bg-dark-card border-dark-border text-ink-muted hover:border-brand/40 hover:text-white'
                   }`}>
                   <span>{g.icon}</span>{g.label}
                 </button>
               ))}
             </div>
             <div className="flex items-center gap-3 mb-5">
-              <span className="text-xs text-slate-600">Sort:</span>
+              <span className="text-xs text-ink-faint">Sort:</span>
               <select value={sort} onChange={e => setSort(e.target.value)}
-                className="bg-dark-card border border-dark-border rounded-xl px-3 py-1.5 text-xs text-slate-300 outline-none cursor-pointer hover:border-brand/40 transition-colors">
+                className="bg-dark-card border border-dark-border rounded-xl px-3 py-1.5 text-xs text-ink outline-none cursor-pointer hover:border-brand/40 transition-colors">
                 {SORT.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
               </select>
             </div>
@@ -240,7 +271,7 @@ export default function Anime() {
 
         {searchQ && (
           <div className="flex items-center gap-3 mb-5">
-            <p className="text-sm text-slate-400">Results for <span className="text-white font-semibold">"{searchQ}"</span></p>
+            <p className="text-sm text-ink-muted">Results for <span className="text-white font-semibold">"{searchQ}"</span></p>
             <button onClick={() => { setSearch(''); setSearchQ('') }} className="text-xs text-brand hover:underline">Clear</button>
           </div>
         )}
@@ -250,7 +281,7 @@ export default function Anime() {
             {Array(18).fill(0).map((_,i) => <div key={i} className="skeleton rounded-xl" style={{ aspectRatio:'2/3' }} />)}
           </div>
         ) : anime.length === 0 ? (
-          <div className="flex flex-col items-center py-20 text-slate-500 gap-3">
+          <div className="flex flex-col items-center py-20 text-ink-faint gap-3">
             <span className="text-5xl">🎌</span>
             <p>No anime found{searchQ ? ` for "${searchQ}"` : ''}</p>
             <button onClick={() => { setGenre(0); setSort('popularity.desc'); setSearch('') }} className="text-brand text-sm hover:underline">Reset</button>
@@ -262,7 +293,7 @@ export default function Anime() {
             </div>
             <div ref={sentinel} className="h-4 mt-4" />
             {busy && <div className="flex justify-center py-8"><div className="w-7 h-7 border-2 border-dark-border border-t-brand rounded-full animate-spin" /></div>}
-            {!hasMore && anime.length > 0 && <p className="text-center text-xs text-slate-700 py-8">— End of list —</p>}
+            {!hasMore && anime.length > 0 && <p className="text-center text-xs text-ink-faint py-8">— End of list —</p>}
           </>
         )}
       </section>

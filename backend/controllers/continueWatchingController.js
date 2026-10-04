@@ -1,5 +1,10 @@
-// backend/controllers/continueWatchingController.js — FULL REPLACEMENT
+// backend/controllers/continueWatchingController.js
 const User = require('../models/User')
+
+// Text from the browser: strings only, length-capped; images must be http(s) or a TMDB path
+const text = (v, n) => (typeof v === 'string' ? v.slice(0, n) : '')
+const image = (v) => (typeof v === 'string' && /^(https?:\/\/|\/)[^\s"'<>]{0,400}$/.test(v) ? v : '')
+const num = (v) => (v === null || v === undefined || v === '' || isNaN(Number(v)) ? null : Number(v))
 
 // ── GET /api/users/continue-watching ─────────────────────────────────────
 const getAll = async (req, res) => {
@@ -7,11 +12,11 @@ const getAll = async (req, res) => {
     const user = await User.findById(req.user._id).select('continueWatching')
     if (!user) return res.status(404).json({ message: 'User not found' })
 
-    // Return newest-first
     const sorted = [...(user.continueWatching || [])].sort(
       (a, b) => new Date(b.watchedAt) - new Date(a.watchedAt)
     )
-    res.json(sorted)
+    // Finished episodes become "Up next", finished movies drop off (utils/continueWatching.js)
+    res.json(await require('../utils/continueWatching').smartRow(sorted))
   } catch (err) {
     console.error('[CW getAll]', err.message)
     res.status(500).json({ message: 'Server error' })
@@ -24,41 +29,39 @@ const save = async (req, res) => {
     const {
       movieId, title, poster, backdrop,
       type, season, episode, episodeName,
-      progress, durationMins,
+      progress, timestamp, duration, durationMins,
     } = req.body
 
-    if (!movieId || !title) {
+    if (!Number.isInteger(Number(movieId)) || Number(movieId) <= 0 || !text(title, 300)) {
       return res.status(400).json({ message: 'movieId and title required' })
     }
 
     const user = await User.findById(req.user._id)
     if (!user) return res.status(404).json({ message: 'User not found' })
 
-    // Remove old entry for same movie
     user.continueWatching = (user.continueWatching || []).filter(
       item => Number(item.movieId) !== Number(movieId)
     )
 
-    // Add new entry at front
     user.continueWatching.unshift({
-      movieId:     Number(movieId),
-      title:       String(title),
-      poster:      poster       || '',
-      backdrop:    backdrop     || '',
-      type:        type         || 'movie',
-      season:      season       != null ? Number(season)      : null,
-      episode:     episode      != null ? Number(episode)     : null,
-      episodeName: episodeName  || '',
-      progress:    progress     != null ? Number(progress)    : 0,
-      durationMins:durationMins != null ? Number(durationMins): null,
-      watchedAt:   new Date(),
+      movieId:      Number(movieId),
+      title:        text(title, 300),
+      poster:       image(poster),
+      backdrop:     image(backdrop),
+      type:         type === 'tv' ? 'tv' : 'movie',
+      season:       num(season),
+      episode:      num(episode),
+      episodeName:  text(episodeName, 200),
+      progress:     Math.min(Math.max(num(progress) ?? 0, 0), 100),
+      timestamp:    Math.max(num(timestamp) ?? 0, 0),
+      duration:     num(duration),
+      durationMins: num(durationMins),
+      watchedAt:    new Date(),
     })
 
-    // Keep max 20
     user.continueWatching = user.continueWatching.slice(0, 20)
-
     await user.save()
-    res.json({ success: true, items: user.continueWatching })
+    res.json({ success: true })
   } catch (err) {
     console.error('[CW save]', err.message)
     res.status(500).json({ message: 'Server error' })
@@ -71,13 +74,7 @@ const remove = async (req, res) => {
     const movieId = Number(req.params.movieId)
     if (isNaN(movieId)) return res.status(400).json({ message: 'Invalid movieId' })
 
-    const user = await User.findById(req.user._id)
-    if (!user) return res.status(404).json({ message: 'User not found' })
-
-    user.continueWatching = (user.continueWatching || []).filter(
-      item => Number(item.movieId) !== movieId
-    )
-    await user.save()
+    await User.updateOne({ _id: req.user._id }, { $pull: { continueWatching: { movieId } } })
     res.json({ success: true })
   } catch (err) {
     console.error('[CW remove]', err.message)

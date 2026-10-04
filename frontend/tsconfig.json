@@ -2,7 +2,11 @@
   "compilerOptions": {
     "target": "ES2020",
     "useDefineForClassFields": true,
-    "lib": ["ES2020", "DOM", "DOM.Iterable"],
+    "lib": [
+      "ES2020",
+      "DOM",
+      "DOM.Iterable"
+    ],
     "module": "ESNext",
     "skipLibCheck": true,
     "moduleResolution": "bundler",
@@ -13,7 +17,33 @@
     "jsx": "react-jsx",
     "strict": true,
     "baseUrl": ".",
-    "paths": { "@/*": ["src/*"] }
+    "paths": {
+      "@/*": [
+        "src/*"
+      ]
+    }
   },
-  "include": ["src"]
+  "include": [
+    "src"
+  ],
+  "exclude": [
+    "src/components/KidsMode",
+    "src/pages/Kids.tsx",
+    "src/APP_ADDITIONS.ts",
+    "src/APP_INTEGRATION.tsx",
+    "src/APP_KIDS_ROUTE.ts",
+    "src/APP_ROUTES_ADDITION.ts",
+    "src/components/NAVBAR_CHANGES.ts",
+    "src/context/watchlistStore.ts",
+    "src/utils/secureStorage.ts",
+    "src/components/VideoPlayer.tsx",
+    "src/components/HoverTrailerCard.tsx",
+    "src/components/SleepTimer.tsx",
+    "src/components/HeroBanner.tsx",
+    "src/services/tmdb.ts",
+    "src/services/animeApi.ts",
+    "src/hooks/useAdBlocker.ts",
+    "src/utils/adBlocker.ts",
+    "src/sw.js"
+  ]
 }

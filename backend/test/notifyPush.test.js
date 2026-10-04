@@ -1,0 +1,30 @@
+// The live inbox push reaches only the named users' sockets (or everyone for null)
+const test = require('node:test')
+const assert = require('node:assert')
+const WebSocket = require('ws')
+
+test('pushNotification sends to the right sockets', async () => {
+  const http = require('node:http')
+  const server = http.createServer()
+  const ws = require('../websocket')
+  const tokens = require('../utils/tokens')
+  process.env.JWT_SECRET = process.env.JWT_SECRET || 'x'.repeat(40)
+  ws.setupWebSocket(server)
+  await new Promise(r => server.listen(0, r))
+  const port = server.address().port
+  const open = (id) => new Promise((resolve) => {
+    const c = new WebSocket(`ws://127.0.0.1:${port}/ws?token=${tokens.signAccess({ _id: id, tokenVersion: 0 })}`)
+    const got = []
+    c.on('message', d => got.push(JSON.parse(d)))
+    c.on('open', () => setTimeout(() => resolve({ c, got }), 50))
+  })
+  const a = await open('aaaaaaaaaaaaaaaaaaaaaaaa'), b = await open('bbbbbbbbbbbbbbbbbbbbbbbb')
+  ws.pushNotification(['aaaaaaaaaaaaaaaaaaaaaaaa'], { title: 'Only A' })
+  ws.pushNotification(null, { title: 'Everyone' })
+  await new Promise(r => setTimeout(r, 100))
+  const titles = x => x.got.filter(m => m.type === 'NOTIFICATION').map(m => m.item.title)
+  assert.deepStrictEqual(titles(a), ['Only A', 'Everyone'])
+  assert.deepStrictEqual(titles(b), ['Everyone'])
+  a.c.close(); b.c.close(); server.close()
+  setTimeout(() => process.exit(0), 50).unref()
+})

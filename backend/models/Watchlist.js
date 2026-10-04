@@ -1,24 +1,19 @@
-// backend/models/Watchlist.js — FIXED (prevents OverwriteModelError forever)
-const mongoose = require('mongoose');
+// backend/models/Watchlist.js — one document per (user, title)
+const mongoose = require('mongoose')
 
 const watchlistSchema = new mongoose.Schema({
-  userId: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'User',
-    required: true,
-  },
-  items: [{
-    contentId: String,        // TMDB or anime ID
-    type: { type: String, enum: ['movie', 'tv', 'anime'] },
-    addedAt: { type: Date, default: Date.now },
-    title: String,            // optional cache from TMDB
-    poster: String,
-  }],
-  createdAt: { type: Date, default: Date.now },
-  updatedAt: { type: Date, default: Date.now },
-});
+  user:     { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+  movieId:  { type: Number, required: true },
+  title:    { type: String, required: true },
+  poster:   { type: String, default: '' },
+  backdrop: { type: String, default: '' },
+  rating:   { type: Number, default: 0 },
+  year:     { type: String, default: '' },
+  type:     { type: String, enum: ['movie', 'tv'], default: 'movie' },
+  addedAt:  { type: Date, default: Date.now },
+}, { timestamps: true })
 
-// Prevent overwrite error — use existing model if already compiled
-const Watchlist = mongoose.models.Watchlist || mongoose.model('Watchlist', watchlistSchema);
+watchlistSchema.index({ user: 1, movieId: 1 }, { unique: true })
+watchlistSchema.index({ user: 1, addedAt: -1 })
 
-module.exports = Watchlist;
+module.exports = mongoose.models.Watchlist || mongoose.model('Watchlist', watchlistSchema)

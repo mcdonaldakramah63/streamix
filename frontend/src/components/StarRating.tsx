@@ -53,14 +53,14 @@ export default function StarRating({ tmdbId, type, initialRating = 0, totalRatin
             className={`text-2xl transition-all duration-150 leading-none ${
               star <= display
                 ? 'text-gold scale-110 drop-shadow-[0_0_6px_rgba(245,158,11,0.5)]'
-                : 'text-slate-700 hover:text-slate-500'
+                : 'text-ink-faint hover:text-ink-faint'
             } disabled:cursor-default`}>
             ★
           </button>
         ))}
 
         {saving && (
-          <div className="w-4 h-4 border border-slate-500 border-t-brand rounded-full animate-spin ml-2" />
+          <div className="w-4 h-4 border border-white/20 border-t-brand rounded-full animate-spin ml-2" />
         )}
         {saved && !saving && (
           <span className="text-brand text-xs ml-2 animate-fade-in font-medium">Saved!</span>
@@ -68,7 +68,7 @@ export default function StarRating({ tmdbId, type, initialRating = 0, totalRatin
       </div>
 
       {/* Labels */}
-      <div className="flex items-center gap-3 text-xs text-slate-600">
+      <div className="flex items-center gap-3 text-xs text-ink-faint">
         {myRating > 0 && (
           <span>
             Your rating: <span className="text-gold font-semibold">{myRating}/5</span>
@@ -76,12 +76,12 @@ export default function StarRating({ tmdbId, type, initialRating = 0, totalRatin
         )}
         {avg > 0 && (
           <span>
-            Community: <span className="text-slate-400">★ {avg.toFixed(1)}</span>
-            <span className="text-slate-700 ml-1">({total.toLocaleString()})</span>
+            Community: <span className="text-ink-muted">★ {avg.toFixed(1)}</span>
+            <span className="text-ink-faint ml-1">({total.toLocaleString()})</span>
           </span>
         )}
         {!user && (
-          <span className="text-slate-700 italic">Sign in to rate</span>
+          <span className="text-ink-faint italic">Sign in to rate</span>
         )}
       </div>
     </div>

@@ -1,131 +1,154 @@
-// frontend/src/pages/Register.tsx — FULL REPLACEMENT
-import { useState } from 'react'
+// frontend/src/pages/Register.tsx
+import { useEffect, useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { useAuthStore } from '../context/authStore'
-import api from '../services/api'
+import api, { errorMessage } from '../services/api'
+import { login } from '../services/session'
+import AuthShell, { Field } from '../components/AuthShell'
+import Icon from '../components/Icon'
+import EmailVerify, { PendingVerification } from '../components/EmailVerify'
+
+type EmailHint = { state: 'idle' | 'checking' | 'ok' | 'bad'; message?: string; suggestion?: string; reason?: string }
+
+// Mirrors backend/utils/passwordRules.js
+const RULES = [
+  { test: (p: string) => p.length >= 8,          label: '8+ characters' },
+  { test: (p: string) => /[A-Z]/.test(p),        label: 'Uppercase letter' },
+  { test: (p: string) => /[0-9]/.test(p),        label: 'Number' },
+  { test: (p: string) => /[^A-Za-z0-9]/.test(p), label: 'Symbol' },
+]
 
 export default function Register() {
-  const navigate  = useNavigate()
-  const { setUser } = useAuthStore()
-
+  const navigate = useNavigate()
   const [form,    setForm]    = useState({ username: '', email: '', password: '', confirm: '' })
   const [error,   setError]   = useState('')
   const [loading, setLoading] = useState(false)
   const [showPw,  setShowPw]  = useState(false)
+  const [pending, setPending] = useState<PendingVerification | null>(null)
+  const [hint,    setHint]    = useState<EmailHint>({ state: 'idle' })
+  const [confirmTypo, setConfirmTypo] = useState(false)
+  const checkSeq = useRef(0)
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  // Live check while typing (debounced): can this address receive mail? typo? throwaway?
+  useEffect(() => {
+    const email = form.email.trim()
+    setConfirmTypo(false)
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]{2,}$/.test(email)) { setHint({ state: 'idle' }); return }
+    const seq = ++checkSeq.current
+    setHint(h => (h.state === 'bad' ? h : { state: 'checking' }))
+    const t = setTimeout(async () => {
+      try {
+        const { data } = await api.get('/auth/email-check', { params: { email } })
+        if (seq !== checkSeq.current) return
+        setHint(data.ok ? { state: 'ok' } : { state: 'bad', message: data.message, suggestion: data.suggestion, reason: data.reason })
+      } catch { if (seq === checkSeq.current) setHint({ state: 'idle' }) }
+    }, 600)
+    return () => clearTimeout(t)
+  }, [form.email])
+
+  const passed = RULES.filter(r => r.test(form.password)).length
+
+  const submit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!form.username || !form.email || !form.password) { setError('Please fill in all fields'); return }
+    if (!/^[a-zA-Z0-9_]{3,30}$/.test(form.username)) { setError('Username: 3–30 letters, numbers or underscores'); return }
+    if (passed < RULES.length) { setError('Password needs ' + RULES.filter(r => !r.test(form.password)).map(r => r.label.toLowerCase()).join(', ')); return }
     if (form.password !== form.confirm) { setError('Passwords do not match'); return }
-    if (form.password.length < 8) { setError('Password must be at least 8 characters'); return }
+    if (hint.state === 'bad' && !(hint.reason === 'typo' && confirmTypo)) { setError(hint.reason === 'typo' ? 'Check your email address — tap the suggestion, or “No, it’s correct”' : hint.message || 'Check your email address'); return }
     setLoading(true); setError('')
     try {
-      const { data } = await api.post('/auth/register', {
-        username: form.username, email: form.email, password: form.password
-      })
-      setUser(data)
-      navigate('/')
+      const { data } = await api.post('/auth/register', { username: form.username.trim(), email: form.email.trim(), password: form.password, confirmTypo })
+      if (data.verificationRequired) { setPending(data); return }
+      login(data)
+      navigate('/', { replace: true })
     } catch (err: any) {
-      setError(err?.response?.data?.message || 'Registration failed')
+      const d = err?.response?.data
+      if (d?.field === 'email' && d?.reason) setHint({ state: 'bad', message: d.message, suggestion: d.suggestion, reason: d.reason })
+      setError(d?.reason === 'typo' ? '' : errorMessage(err, 'Registration failed'))
     } finally {
       setLoading(false)
     }
   }
 
-  const pwStrength = form.password.length === 0 ? 0
-    : form.password.length < 6 ? 1
-    : form.password.length < 10 ? 2 : 3
+  if (pending) return (
+    <EmailVerify pending={pending} onBack={() => { setPending(null); setError('') }}
+      onVerified={data => { login(data); navigate('/', { replace: true }) }} />
+  )
 
-  const strengthLabel = ['', 'Weak', 'Good', 'Strong']
-  const strengthColor = ['', 'bg-red-500', 'bg-yellow-500', 'bg-brand']
+  const useSuggestion = () => { if (hint.suggestion) setForm(f => ({ ...f, email: hint.suggestion! })) }
 
   return (
-    <div className="min-h-screen flex items-center justify-center px-4 py-8 relative overflow-hidden"
-      style={{ background: 'radial-gradient(ellipse at 80% 50%, rgba(20,184,166,0.06) 0%, #07080c 60%)' }}>
-
-      <div className="absolute top-1/3 right-1/4 w-64 h-64 bg-brand/5 rounded-full blur-3xl pointer-events-none" />
-
-      <div className="w-full max-w-sm relative z-10">
-
-        <div className="text-center mb-8">
-          <Link to="/" className="text-brand font-bold text-2xl" style={{ fontFamily: 'Syne, sans-serif' }}>
-            STREAMIX
-          </Link>
-          <p className="text-slate-500 text-sm mt-1">Create your account</p>
-        </div>
-
-        <div className="glass rounded-3xl p-7 shadow-deep">
-          <h1 className="text-xl font-bold text-white mb-6" style={{ fontFamily: 'Syne, sans-serif' }}>
-            Sign Up
-          </h1>
-
-          {error && (
-            <div className="bg-red-500/10 border border-red-500/30 text-red-400 text-sm px-4 py-3 rounded-xl mb-5 animate-slide-down">
-              {error}
+    <AuthShell badge="Free account" title="Create your account" subtitle="Save titles to your list, resume on any device, and set up profiles for the whole household."
+      footer={<>Already have an account? <Link to="/login" className="text-brand-soft font-bold hover:text-white">Sign in</Link></>}>
+      <form onSubmit={submit} className="flex flex-col gap-4" noValidate>
+        {error && (
+          <div role="alert" className="flex items-start gap-2 rounded-xl px-3.5 py-3 text-sm bg-brand/10 text-brand-soft border border-brand/25 animate-slide-down">
+            <Icon name="error" size={18} className="mt-px" />{error}
+          </div>
+        )}
+        <Field id="username" label="Username" icon="person">
+          <input id="username" autoComplete="username" value={form.username} placeholder="cinephile_42" maxLength={30}
+            onChange={e => setForm(f => ({ ...f, username: e.target.value }))} className="input pl-11" />
+        </Field>
+        <Field id="email" label="Email" icon="alternate_email">
+          <input id="email" type="email" autoComplete="email" value={form.email} placeholder="name@domain.com"
+            aria-invalid={hint.state === 'bad' && !confirmTypo} aria-describedby="email-hint"
+            onChange={e => setForm(f => ({ ...f, email: e.target.value }))} className={`input pl-11 pr-10 ${hint.state === 'bad' && !confirmTypo ? '!border-brand/60' : ''}`} />
+          <span className="absolute right-3 flex items-center" aria-hidden="true">
+            {hint.state === 'checking' && <span className="w-4 h-4 border-2 border-white/20 border-t-white/70 rounded-full animate-spin" />}
+            {hint.state === 'ok' && <Icon name="check_circle" size={20} className="text-cyan" fill />}
+            {hint.state === 'bad' && !confirmTypo && <Icon name="error" size={20} className="text-brand-soft" />}
+          </span>
+        </Field>
+        <div id="email-hint" aria-live="polite" className="-mt-2 empty:hidden">
+          {hint.state === 'bad' && hint.reason === 'typo' && !confirmTypo && (
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[13px]">
+              <span className="text-gold">Did you mean</span>
+              <button type="button" onClick={useSuggestion} className="font-bold text-white underline decoration-gold/60 underline-offset-2 hover:decoration-gold">{hint.suggestion}</button>
+              <span className="text-ink-faint">?</span>
+              <button type="button" onClick={() => setConfirmTypo(true)} className="ml-auto text-xs text-ink-faint hover:text-white">No, it’s correct</button>
             </div>
           )}
-
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div>
-              <label className="block text-xs font-semibold text-slate-400 mb-1.5 uppercase tracking-wider">Username</label>
-              <input type="text" value={form.username} onChange={e => setForm(f => ({ ...f, username: e.target.value }))}
-                placeholder="cooluser123" className="input" autoComplete="username" />
-            </div>
-
-            <div>
-              <label className="block text-xs font-semibold text-slate-400 mb-1.5 uppercase tracking-wider">Email</label>
-              <input type="email" value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))}
-                placeholder="you@example.com" className="input" autoComplete="email" />
-            </div>
-
-            <div>
-              <label className="block text-xs font-semibold text-slate-400 mb-1.5 uppercase tracking-wider">Password</label>
-              <div className="relative">
-                <input type={showPw ? 'text' : 'password'} value={form.password}
-                  onChange={e => setForm(f => ({ ...f, password: e.target.value }))}
-                  placeholder="8+ characters" className="input pr-11" autoComplete="new-password" />
-                <button type="button" onClick={() => setShowPw(p => !p)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300 text-xs">
-                  {showPw ? 'Hide' : 'Show'}
-                </button>
-              </div>
-              {/* Password strength */}
-              {form.password && (
-                <div className="mt-2 flex items-center gap-2">
-                  <div className="flex gap-1 flex-1">
-                    {[1,2,3].map(i => (
-                      <div key={i} className={`h-1 flex-1 rounded-full transition-all ${i <= pwStrength ? strengthColor[pwStrength] : 'bg-dark-border'}`} />
-                    ))}
-                  </div>
-                  <span className={`text-xs font-medium ${pwStrength === 1 ? 'text-red-400' : pwStrength === 2 ? 'text-yellow-400' : 'text-brand'}`}>
-                    {strengthLabel[pwStrength]}
-                  </span>
-                </div>
-              )}
-            </div>
-
-            <div>
-              <label className="block text-xs font-semibold text-slate-400 mb-1.5 uppercase tracking-wider">Confirm Password</label>
-              <input type="password" value={form.confirm}
-                onChange={e => setForm(f => ({ ...f, confirm: e.target.value }))}
-                placeholder="••••••••" className="input" autoComplete="new-password" />
-              {form.confirm && form.password !== form.confirm && (
-                <p className="text-red-400 text-xs mt-1">Passwords don't match</p>
-              )}
-            </div>
-
-            <button type="submit" disabled={loading}
-              className="btn-primary w-full py-3 text-base font-semibold mt-2 disabled:opacity-60">
-              {loading ? <div className="w-5 h-5 border-2 border-dark/30 border-t-dark rounded-full animate-spin" /> : 'Create Account'}
-            </button>
-          </form>
-
-          <p className="text-center text-sm text-slate-500 mt-6">
-            Already have an account?{' '}
-            <Link to="/login" className="text-brand hover:text-brand-light transition-colors font-medium">Sign In</Link>
-          </p>
+          {hint.state === 'bad' && hint.reason !== 'typo' && (
+            <p className="text-[13px] text-brand-soft flex items-start gap-1.5">
+              <span>{hint.message}</span>
+              {hint.suggestion && <button type="button" onClick={useSuggestion} className="font-bold text-white underline underline-offset-2 whitespace-nowrap">Use {hint.suggestion}</button>}
+            </p>
+          )}
+          {hint.state === 'ok' && <p className="text-xs text-ink-faint">We’ll send a code to this address to confirm it’s yours.</p>}
         </div>
-      </div>
-    </div>
+        <Field id="password" label="Password" icon="lock">
+          <input id="password" type={showPw ? 'text' : 'password'} autoComplete="new-password" value={form.password} maxLength={72}
+            onChange={e => setForm(f => ({ ...f, password: e.target.value }))} className="input pl-11 pr-12" />
+          <button type="button" onClick={() => setShowPw(p => !p)} aria-label={showPw ? 'Hide password' : 'Show password'}
+            className="absolute right-2 w-9 h-9 flex items-center justify-center rounded-lg text-ink-faint hover:text-white">
+            <Icon name={showPw ? 'visibility_off' : 'visibility'} size={20} />
+          </button>
+        </Field>
+        {form.password && (
+          <div className="-mt-1">
+            <div className="flex gap-1 mb-2">
+              {RULES.map((_, i) => (
+                <span key={i} className={`h-1 flex-1 rounded-full transition-colors ${i < passed ? (passed === RULES.length ? 'bg-cyan shadow-cyan' : 'bg-gold') : 'bg-dark-high'}`} />
+              ))}
+            </div>
+            <div className="flex flex-wrap gap-x-3 gap-y-1">
+              {RULES.map(r => (
+                <span key={r.label} className={`flex items-center gap-1 text-xs ${r.test(form.password) ? 'text-cyan' : 'text-ink-faint'}`}>
+                  <Icon name={r.test(form.password) ? 'check_circle' : 'radio_button_unchecked'} size={14} />{r.label}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+        <Field id="confirm" label="Confirm password" icon="lock_reset">
+          <input id="confirm" type="password" autoComplete="new-password" value={form.confirm} maxLength={72}
+            onChange={e => setForm(f => ({ ...f, confirm: e.target.value }))} className="input pl-11" />
+        </Field>
+        {form.confirm && form.password !== form.confirm && <p className="text-xs text-brand-soft -mt-2">Passwords don't match</p>}
+        <button type="submit" disabled={loading} className="btn-primary w-full h-12 mt-1 text-[15px] disabled:opacity-60">
+          {loading ? <span className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : <>Create account <Icon name="arrow_forward" size={20} /></>}
+        </button>
+      </form>
+    </AuthShell>
   )
 }

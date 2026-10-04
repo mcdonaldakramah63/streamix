@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom'
 import api from '../services/api'
 import { useWatchlistStore } from '../stores/watchlistStore'
 import { useAuthStore } from '../context/authStore'
+import { useProfileStore } from '../stores/profileStore'
 
 interface FeedItem {
   id:           number
@@ -18,6 +19,15 @@ interface FeedItem {
   genre_ids:    number[]
   trailerKey?:  string
   media_type:   'movie' | 'tv'
+  /** Personalised feed (/profiles/:id/feed): what kind of story, and its headline */
+  storyKind?:   string
+  headline?:    string
+  detail?:      string
+}
+
+const STORY_BADGE: Record<string, string> = {
+  new_episode: 'New episode', premiere: 'Premiere', library: 'On Streamix', coming_soon: 'Coming soon', pick: 'Top pick for you',
+  community: 'Viewers here', fresh_hit: 'New & loved', trending: 'Trending',
 }
 
 const IMG = (p: string | null, s = 'w1280') => p ? `https://image.tmdb.org/t/p/${s}${p}` : ''
@@ -65,7 +75,7 @@ function FeedCard({
     if (!user || wlLoading) return
     setWlLoad(true)
     try {
-      inWL ? await remove(item.id) : await add({
+      inWL ? await remove(item.id) : await add({ type: item.media_type,
         movieId: item.id, title,
         poster: item.poster_path || '', backdrop: item.backdrop_path || '',
         rating: item.vote_average, year: yr,
@@ -95,7 +105,7 @@ function FeedCard({
 
   return (
     <div
-      className="relative w-full h-full flex-shrink-0 overflow-hidden bg-[#07080c] snap-start"
+      className="relative w-full h-full flex-shrink-0 overflow-hidden bg-[#0f131c] snap-start"
       onTouchStart={onTouchStart}
       onTouchMove={onTouchMove}
       onTouchEnd={onTouchEnd}
@@ -117,8 +127,8 @@ function FeedCard({
       )}
 
       {/* Gradients */}
-      <div className="absolute inset-0 bg-gradient-to-t from-[#07080c] via-[#07080c]/30 to-transparent" />
-      <div className="absolute inset-0 bg-gradient-to-r from-[#07080c]/60 to-transparent" />
+      <div className="absolute inset-0 bg-gradient-to-t from-[#0f131c] via-[#0f131c]/30 to-transparent" />
+      <div className="absolute inset-0 bg-gradient-to-r from-[#0f131c]/60 to-transparent" />
 
       {/* Top bar */}
       <div className="absolute top-0 left-0 right-0 p-4 flex items-center justify-between z-20">
@@ -190,12 +200,16 @@ function FeedCard({
             {item.media_type === 'tv' ? '📺 Show' : '🎬 Movie'}
           </span>
           {genres.map(g => (
-            <span key={g} className="text-[10px] text-slate-400 border border-dark-border px-2 py-0.5 rounded-full">{g}</span>
+            <span key={g} className="text-[10px] text-ink-muted border border-dark-border px-2 py-0.5 rounded-full">{g}</span>
           ))}
-          {yr && <span className="text-[10px] text-slate-500">{yr}</span>}
+          {yr && <span className="text-[10px] text-ink-faint">{yr}</span>}
         </div>
+        {item.storyKind && (
+          <p className="text-[11px] font-bold uppercase tracking-wide text-gold mb-1">{STORY_BADGE[item.storyKind] || 'For you'}{item.detail ? ` · ${item.detail}` : ''}</p>
+        )}
+        {item.headline && item.headline !== title && <p className="text-sm font-semibold text-white/90 mb-1 line-clamp-2">{item.headline}</p>}
 
-        <h2 className="font-bold text-white text-lg sm:text-xl leading-tight mb-1" style={{ fontFamily: 'Syne, sans-serif' }}>
+        <h2 className="font-bold text-white text-lg sm:text-xl leading-tight mb-1" style={{ fontFamily: 'Plus Jakarta Sans, sans-serif' }}>
           {title}
         </h2>
 
@@ -203,12 +217,12 @@ function FeedCard({
           <div className="flex items-center gap-1 mb-2">
             <span className="text-gold text-sm">★</span>
             <span className="text-white text-sm font-semibold">{item.vote_average.toFixed(1)}</span>
-            <span className="text-slate-500 text-xs">/10</span>
+            <span className="text-ink-faint text-xs">/10</span>
           </div>
         )}
 
         <p
-          className={`text-slate-300 text-xs leading-relaxed cursor-pointer ${showInfo ? '' : 'line-clamp-2'}`}
+          className={`text-ink text-xs leading-relaxed cursor-pointer ${showInfo ? '' : 'line-clamp-2'}`}
           onClick={() => setShowInfo(s => !s)}
         >
           {item.overview || 'Tap to see details.'}
@@ -256,6 +270,22 @@ export default function VerticalFeed({ onClose }: { onClose: () => void }) {
     else setLoadingMore(true)
 
     try {
+      // Signed in with a profile: the ranked news feed (new episodes, releases, library, picks…)
+      const profile = useProfileStore.getState().activeProfile
+      if (profile) {
+        const { data } = await api.get(`/profiles/${profile._id}/feed`, { params: { page: pg, ...(isRefresh ? { fresh: 1 } : {}) } })
+        const stories: FeedItem[] = (data.items || []).filter((s: any) => s.item.backdrop_path || s.item.poster_path).map((s: any) => ({
+          ...s.item, genre_ids: s.item.genre_ids || [], overview: s.item.overview || '', media_type: s.item.media_type === 'tv' ? 'tv' : 'movie',
+          trailerKey: s.trailerKey || undefined, storyKind: s.kind, headline: s.headline, detail: s.detail,
+        }))
+        if (stories.length || pg > 1) {
+          if (append) setItems(prev => { const seen = new Set(prev.map(i => `${i.media_type}:${i.id}`)); return [...prev, ...stories.filter(i => !seen.has(`${i.media_type}:${i.id}`))] })
+          else { setItems(stories); setIndex(0) }
+          setPage(pg)
+          setHasMore(!!data.hasMore)
+          return
+        }
+      }
       const [trending, popular, topRated, upcoming] = await Promise.all([
         api.get('/movies/trending', { params: { page: pg } }),
         api.get('/movies/popular', { params: { page: pg } }),
@@ -270,27 +300,17 @@ export default function VerticalFeed({ onClose }: { onClose: () => void }) {
         ...(upcoming.data.results || []),
       ]
 
-      // Remove duplicates and shuffle well
       newItems = Array.from(new Map(newItems.map(item => [item.id, item])).values())
-      newItems = newItems.sort(() => Math.random() - 0.5)
-
-      // Enrich with trailers
-      const enriched = await Promise.all(
-        newItems.map(async (item: any) => {
-          const mediaType = item.name && !item.title ? 'tv' : 'movie'
-          try {
-            const endpoint = mediaType === 'tv' ? `/movies/tv/${item.id}/videos` : `/movies/${item.id}/videos`
-            const { data } = await api.get(endpoint)
-            const trailer = (data.results || []).find((v: any) => v.type === 'Trailer' && v.site === 'YouTube')
-            return { ...item, media_type: mediaType, trailerKey: trailer?.key }
-          } catch {
-            return { ...item, media_type: mediaType }
-          }
-        })
-      )
+        .filter(item => item.backdrop_path)
+        .sort(() => Math.random() - 0.5)
+        .map(item => ({ ...item, media_type: item.name && !item.title ? 'tv' : 'movie', genre_ids: item.genre_ids || [] }))
+      const enriched = newItems
 
       if (append) {
-        setItems(prev => [...prev, ...enriched])
+        setItems(prev => {
+          const seen = new Set(prev.map(i => i.id))
+          return [...prev, ...enriched.filter(i => !seen.has(i.id))]
+        })
       } else {
         setItems(enriched)
         setIndex(0) // Reset to first item on refresh
@@ -314,9 +334,24 @@ export default function VerticalFeed({ onClose }: { onClose: () => void }) {
 
   // Refresh Feed
   const handleRefresh = () => {
+    trailerTried.current.clear()
     setIndex(0)
     fetchItems(1, false, true)
   }
+
+  // Fetch trailers lazily for the active card and its neighbours
+  const trailerTried = useRef(new Set<number>())
+  useEffect(() => {
+    items.slice(Math.max(0, index - 1), index + 3).forEach(item => {
+      if (trailerTried.current.has(item.id)) return
+      trailerTried.current.add(item.id)
+      const endpoint = item.media_type === 'tv' ? `/movies/tv/${item.id}/videos` : `/movies/${item.id}/videos`
+      api.get(endpoint).then(({ data }) => {
+        const t = (data.results || []).find((v: any) => v.type === 'Trailer' && v.site === 'YouTube')
+        if (t) setItems(prev => prev.map(i => (i.id === item.id ? { ...i, trailerKey: t.key } : i)))
+      }).catch(() => {})
+    })
+  }, [index, items])
 
   // Infinite scroll
   const handleScroll = useCallback(() => {
@@ -354,15 +389,15 @@ export default function VerticalFeed({ onClose }: { onClose: () => void }) {
 
   if (loading && items.length === 0) {
     return (
-      <div className="fixed inset-0 z-[200] bg-[#07080c] flex flex-col items-center justify-center gap-4">
+      <div className="fixed inset-0 z-[200] bg-[#0f131c] flex flex-col items-center justify-center gap-4">
         <div className="w-10 h-10 border-2 border-dark-border border-t-brand rounded-full animate-spin" />
-        <p className="text-slate-500 text-sm">Curating your feed...</p>
+        <p className="text-ink-faint text-sm">Curating your feed...</p>
       </div>
     )
   }
 
   return (
-    <div className="fixed inset-0 z-[200] bg-[#07080c] flex flex-col overflow-hidden">
+    <div className="fixed inset-0 z-[200] bg-[#0f131c] flex flex-col overflow-hidden">
       {/* Header with Refresh Button */}
       <div className="absolute top-0 left-0 right-0 z-30 flex items-center justify-between px-4 pt-safe" style={{ paddingTop: 'env(safe-area-inset-top, 0px)' }}>
         <button

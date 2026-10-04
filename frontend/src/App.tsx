@@ -1,124 +1,129 @@
-// frontend/src/App.tsx — FULL REPLACEMENT
-// BrowserRouter is in main.tsx — do NOT add here
-import { useEffect, useState, lazy, Suspense } from 'react'
-import { Routes, Route, Navigate, useNavigate } from 'react-router-dom'
+// frontend/src/App.tsx — routes + app-wide chrome (BrowserRouter lives in main.tsx)
+import { lazy, Suspense, useEffect } from 'react'
+import { Routes, Route, Navigate, useLocation } from 'react-router-dom'
 import { useAuthStore }    from './context/authStore'
 import { useProfileStore } from './stores/profileStore'
+import { useWebSocket }    from './hooks/useWebSocket'
 import Navbar              from './components/Navbar'
 import Footer              from './components/Footer'
 import ProfileSelector     from './components/ProfileSelector'
-import { useWebSocket }    from './hooks/useWebSocket'
-import Kids from './pages/Kids'
+import { PinGate }         from './components/PinModal'
+import AnnouncementBanner from './components/AnnouncementBanner'
+import KidsGuard from './components/kids/KidsGuard'
+import { PinPromptHost } from './utils/pinPrompt'
+import { applyTheme } from './utils/theme'
+import { useTop10 } from './stores/top10Store'
+import { InstallBanner, OfflineBanner } from './components/PWABanner'
+import { markOpened } from './components/NotificationBell'
 
-// ── Lazy pages ──────────────────────────────────────────────────────────────
-const Home       = lazy(() => import('./pages/Home'))
-const KidsHome   = lazy(() => import('./pages/Kids'))   // <-- CRITICAL: kids route
+const Home        = lazy(() => import('./pages/Home'))
+const KidsHome    = lazy(() => import('./pages/KidsHome'))
+const Upcoming    = lazy(() => import('./pages/Upcoming'))
+const NewAndHot   = lazy(() => import('./pages/NewAndHot'))
+const Ask   = lazy(() => import('./pages/Ask'))
+const ViewingActivity = lazy(() => import('./pages/ViewingActivity'))
 const MovieDetail = lazy(() => import('./pages/MovieDetail'))
-const TVDetail   = lazy(() => import('./pages/TVDetail'))
-const PersonPage = lazy(() => import('./pages/PersonPage'))
-const Player     = lazy(() => import('./pages/Player'))
-const Search     = lazy(() => import('./pages/Search'))
-const Movies     = lazy(() => import('./pages/Movies'))
-const Anime      = lazy(() => import('./pages/Anime'))
-const TVShows    = lazy(() => import('./pages/TVShows'))
-const Watchlist  = lazy(() => import('./pages/Watchlist'))
-const Profile    = lazy(() => import('./pages/Profile'))
-const Login      = lazy(() => import('./pages/Login'))
-const Register   = lazy(() => import('./pages/Register'))
-const Dashboard  = lazy(() => import('./pages/admin/Dashboard'))
+const TVDetail    = lazy(() => import('./pages/TVDetail'))
+const PersonPage  = lazy(() => import('./pages/PersonPage'))
+const Player      = lazy(() => import('./pages/Player'))
+const Search      = lazy(() => import('./pages/Search'))
+const Movies      = lazy(() => import('./pages/Movies'))
+const Anime       = lazy(() => import('./pages/Anime'))
+const TVShows     = lazy(() => import('./pages/TVShows'))
+const Watchlist   = lazy(() => import('./pages/Watchlist'))
+const VerifyEmail = lazy(() => import('./pages/VerifyEmail'))
+const Downloads   = lazy(() => import('./pages/Downloads'))
+const Profile     = lazy(() => import('./pages/Profile'))
+const Login       = lazy(() => import('./pages/Login'))
+const Register    = lazy(() => import('./pages/Register'))
+const Dashboard   = lazy(() => import('./pages/admin/Dashboard'))
+const LibraryWatch = lazy(() => import('./pages/LibraryWatch'))
 
-// ── Fallback ─────────────────────────────────────────────────────────────────
 function PageLoader() {
   return (
     <div className="min-h-screen flex items-center justify-center">
-      <div className="w-10 h-10 border-2 border-dark-border border-t-brand rounded-full animate-spin" />
+      <div className="w-10 h-10 border-2 border-white/10 border-t-brand rounded-full animate-spin" />
     </div>
   )
 }
 
-// ── WebSocket bridge — only mounts when logged in ────────────────────────────
-function WebSocketBridge() {
-  useWebSocket()
-  return null
-}
+// Paths a kids profile may visit — everything else bounces back to /kids
+const KIDS_ALLOWED = [/^\/kids$/, /^\/player\//, /^\/movie\/\d+$/, /^\/tv\/\d+$/, /^\/downloads$/]
 
-// ── Offline / PWA banners (safe guard if component doesn't exist) ────────────
-function OfflineBanner() {
-  const [online, setOnline] = useState(navigator.onLine)
-  useEffect(() => {
-    const on  = () => setOnline(true)
-    const off = () => setOnline(false)
-    window.addEventListener('online',  on)
-    window.addEventListener('offline', off)
-    return () => { window.removeEventListener('online', on); window.removeEventListener('offline', off) }
-  }, [])
-  if (online) return null
-  return (
-    <div className="fixed top-16 left-0 right-0 z-[90] bg-yellow-500/95 text-dark text-xs font-bold text-center py-2 flex items-center justify-center gap-2">
-      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-        <path d="M1 1l22 22M16.72 11.06A10.94 10.94 0 0 1 19 12.55M5 12.55a10.94 10.94 0 0 1 5.17-2.39M10.71 5.05A16 16 0 0 1 22.56 9M1.42 9a15.91 15.91 0 0 1 4.7-2.88M8.53 16.11a6 6 0 0 1 6.95 0M12 20h.01"/>
-      </svg>
-      You're offline — some features may be unavailable
-    </div>
-  )
-}
-
-// ── Main App component ───────────────────────────────────────────────────────
 export default function App() {
-  const { user }   = useAuthStore()
-  const { activeProfile, profiles, fetch: fetchProfiles, setActive } = useProfileStore()
-  const [profileReady, setProfileReady] = useState(false)
-
+  const user = useAuthStore(s => s.user)
+  const { activeProfile, profiles, loaded, setActive } = useProfileStore()
+  const location = useLocation()
+  useWebSocket()
+  // Arrived from a notification: count the open (the server learns what each person cares about), open the
+  // bell for a "3 updates" push, then tidy the address bar
   useEffect(() => {
-    if (user) {
-      fetchProfiles().finally(() => setProfileReady(true))
-    } else {
-      setProfileReady(true)
-    }
-  }, [user?._id]) // eslint-disable-line react-hooks/exhaustive-deps
+    const q = new URLSearchParams(location.search)
+    const n = q.get('n'), inbox = q.get('inbox')
+    if (!n && !inbox) return
+    if (n && user) markOpened(n)
+    if (inbox && user) setTimeout(() => window.dispatchEvent(new Event('streamix:open-inbox')), 300)
+    q.delete('n'); q.delete('inbox')
+    const rest = q.toString()
+    window.history.replaceState(window.history.state, '', location.pathname + (rest ? `?${rest}` : '') + location.hash)
+  }, [location.search, user])
 
-  // Show profile selector: logged in + loaded + has profiles + none selected
-  const needsProfile = !!(user && profileReady && profiles.length > 0 && !activeProfile)
+  const needsProfile = !!(user && loaded && profiles.length > 0 && !activeProfile)
+  const isKids = !!activeProfile?.isKids
+  // Today's Top 10 (badges on posters)
+  useEffect(() => { useTop10.getState().load() }, [])
+  // Each profile can have its own accent colour
+  useEffect(() => { applyTheme(activeProfile?.theme) }, [activeProfile?.theme])
+  const kidsBlocked = isKids && !KIDS_ALLOWED.some(re => re.test(location.pathname))
+  const bare = location.pathname.startsWith('/player/') || location.pathname.startsWith('/watch/') || location.pathname === '/kids'
 
-  // Hide Navbar/Footer on Player and Kids pages — handled inside those pages
   return (
     <>
       <OfflineBanner />
       <Navbar />
-      {user && <WebSocketBridge />}
+      <PinGate />
+      <PinPromptHost />
+      {isKids && activeProfile && <KidsGuard profileId={activeProfile._id} />}
+      {!bare && !needsProfile && <AnnouncementBanner />}
 
       {needsProfile ? (
-        <ProfileSelector onSelect={(p) => setActive(p)} />
+        <ProfileSelector onSelect={(p) => { setActive(p) }} />
+      ) : kidsBlocked ? (
+        <Navigate to="/kids" replace />
       ) : (
-        <Suspense fallback={<PageLoader />}>
-          <Routes>
-            {/* Home — redirects to /kids if active profile is kids */}
-            <Route path="/"                   element={<Home />} />
-            <Route path="/kids" element={<Kids />} />
-
-            {/* Kids mode — standalone page with its own layout */}
-            <Route path="/kids"               element={<KidsHome />} />
-
-            <Route path="/movie/:id"          element={<MovieDetail />} />
-            <Route path="/tv/:id"             element={<TVDetail />} />
-            <Route path="/person/:id"         element={<PersonPage />} />
-            <Route path="/player/:type/:id"   element={<Player />} />
-            <Route path="/search"             element={<Search />} />
-            <Route path="/movies"             element={<Movies />} />
-            <Route path="/anime"              element={<Anime />} />
-            <Route path="/tv"                 element={<TVShows />} />
-
-            <Route path="/watchlist"  element={user ? <Watchlist /> : <Navigate to="/login" replace />} />
-            <Route path="/profile"    element={user ? <Profile />   : <Navigate to="/login" replace />} />
-            <Route path="/admin"      element={user?.isAdmin ? <Dashboard /> : <Navigate to="/" replace />} />
-            <Route path="/login"      element={!user ? <Login />    : <Navigate to="/" replace />} />
-            <Route path="/register"   element={!user ? <Register /> : <Navigate to="/" replace />} />
-            <Route path="*"           element={<Navigate to="/" replace />} />
-          </Routes>
-        </Suspense>
+        <main className={bare ? '' : 'pb-nav'}>
+          <Suspense fallback={<PageLoader />}>
+            <Routes>
+              <Route path="/"                 element={isKids ? <Navigate to="/kids" replace /> : <Home />} />
+              <Route path="/kids"             element={<KidsHome />} />
+              <Route path="/upcoming"         element={<Upcoming />} />
+              <Route path="/new"              element={<NewAndHot />} />
+              <Route path="/ask"              element={<Ask />} />
+              <Route path="/activity"         element={<ViewingActivity />} />
+              <Route path="/movie/:id"        element={<MovieDetail />} />
+              <Route path="/tv/:id"           element={<TVDetail />} />
+              <Route path="/person/:id"       element={<PersonPage />} />
+              <Route path="/player/:type/:id" element={<Player />} />
+              <Route path="/search"           element={<Search />} />
+              <Route path="/movies"           element={<Movies />} />
+              <Route path="/anime"            element={<Anime />} />
+              <Route path="/tv"               element={<TVShows />} />
+              <Route path="/downloads"        element={<Downloads />} />
+              <Route path="/watch/:id"        element={<LibraryWatch />} />
+              <Route path="/watchlist" element={user ? <Watchlist /> : <Navigate to="/login" replace state={{ from: '/watchlist' }} />} />
+              <Route path="/profile"   element={user ? <Profile />   : <Navigate to="/login" replace state={{ from: '/profile' }} />} />
+              <Route path="/admin"     element={user?.isAdmin ? <Dashboard /> : <Navigate to="/" replace />} />
+              <Route path="/login"     element={!user ? <Login />    : <Navigate to="/" replace />} />
+              <Route path="/register"  element={!user ? <Register /> : <Navigate to="/" replace />} />
+              <Route path="/verify-email" element={<VerifyEmail />} />
+              <Route path="*"          element={<Navigate to="/" replace />} />
+            </Routes>
+          </Suspense>
+        </main>
       )}
 
-      <Footer />
+      {!bare && !needsProfile && <Footer />}
+      <InstallBanner />
     </>
   )
 }

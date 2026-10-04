@@ -1,94 +1,90 @@
 const User = require('../models/User')
+const { log, ACTIONS } = require('../utils/auditLogger')
 
+const publicUser = (u) => ({
+  _id:      u._id,
+  username: u.username,
+  email:    u.email,
+  avatar:   u.avatar,
+  isAdmin:  u.isAdmin,
+  emailVerified: u.emailVerified !== false,
+  pendingEmail: u.pendingEmail || null,
+})
+
+// GET /api/users/profile
 const getProfile = async (req, res) => {
   try {
-    const user = await User.findById(req.user._id)
+    const user = await User.findById(req.user._id).select('-loginAttempts -lockUntil')
     if (!user) return res.status(404).json({ message: 'User not found' })
     res.json(user)
-  } catch (e) {
+  } catch {
     res.status(500).json({ message: 'Failed to fetch profile' })
   }
 }
 
+// PUT /api/users/profile  (also mounted at /api/users/update)
+// Password changes go through PUT /api/users/password, which checks the current password.
 const updateProfile = async (req, res) => {
   try {
-    const user = await User.findById(req.user._id)
+    const user = await User.findById(req.user._id).select('+password')
     if (!user) return res.status(404).json({ message: 'User not found' })
 
-    // Only allow safe fields — never let users set isAdmin, _id, etc.
-    const { username, email, password, avatar } = req.body
+    const { username, email, avatar } = req.body
+    // Changing the sign-in email needs the password (stops a borrowed session taking over the account)
+    if (email !== undefined && String(email).toLowerCase().trim() !== user.email) {
+      if (!(await user.matchPassword(String(req.body.currentPassword || '')))) {
+        return res.status(400).json({ message: 'Enter your current password to change your email', needsPassword: true })
+      }
+    }
 
-    if (username) {
-      if (!/^[a-zA-Z0-9_]{3,30}$/.test(username)) {
-        return res.status(400).json({ message: 'Invalid username format' })
+    if (username !== undefined) {
+      if (!/^[a-zA-Z0-9_]{3,30}$/.test(String(username).trim())) {
+        return res.status(400).json({ message: 'Username: 3–30 letters, numbers or underscores' })
       }
-      user.username = username.trim()
+      user.username = String(username).trim()
     }
-    if (email) {
-      if (!/^\S+@\S+\.\S+$/.test(email)) {
-        return res.status(400).json({ message: 'Invalid email format' })
-      }
-      user.email = email.toLowerCase().trim()
-    }
-    if (avatar) {
-      // Only allow http/https URLs for avatar
+    // A new email must be confirmed before it replaces the old one (POST /users/email does the rest)
+    const emailChanging = email !== undefined && String(email).toLowerCase().trim() !== user.email
+    if (avatar !== undefined && avatar !== '') {
       if (!/^https?:\/\//.test(avatar)) {
         return res.status(400).json({ message: 'Avatar must be a valid URL' })
       }
-      user.avatar = avatar.slice(0, 500)
-    }
-    if (password) {
-      if (password.length < 8) {
-        return res.status(400).json({ message: 'Password must be at least 8 characters' })
-      }
-      user.password = password
+      user.avatar = String(avatar).slice(0, 500)
     }
 
     const updated = await user.save()
-    res.json({
-      _id:      updated._id,
-      username: updated.username,
-      email:    updated.email,
-      avatar:   updated.avatar,
-      isAdmin:  updated.isAdmin,
-    })
+    log(ACTIONS.PROFILE_UPDATE, req)
+    if (emailChanging) {
+      const r = await require('./emailVerifyController').beginChange(user._id, email, req.body.currentPassword, req.body.confirmTypo)
+      const fresh = await User.findById(user._id)
+      return res.status(r.status).json({ ...publicUser(fresh), ...r.body })
+    }
+    res.json(publicUser(updated))
   } catch (e) {
     if (e.code === 11000) return res.status(400).json({ message: 'Username or email already taken' })
     res.status(500).json({ message: 'Update failed' })
   }
 }
 
-const updateContinueWatching = async (req, res) => {
-  const { movieId, title, poster, progress } = req.body
-  if (!movieId || typeof progress !== 'number') {
-    return res.status(400).json({ message: 'movieId and progress required' })
+// PUT /api/users/password  { currentPassword, newPassword }
+const changePassword = async (req, res) => {
+  try {
+    const user = await User.findById(req.user._id).select('+password')
+    if (!user) return res.status(404).json({ message: 'User not found' })
+
+    const ok = await user.matchPassword(String(req.body.currentPassword || ''))
+    if (!ok) return res.status(400).json({ message: 'Current password is incorrect' })
+
+    user.password = req.body.newPassword
+    user.tokenVersion = (user.tokenVersion || 0) + 1 // other devices are signed out
+    await user.save()
+    log(ACTIONS.PASSWORD_CHANGE, req, { severity: 'warn' })
+    require('../utils/securityAlerts').onAccountChange(user, 'Your password was changed', 'Other devices were signed out. If you didn’t do this, reset your password right away.')
+    // Keep this device signed in with a fresh session
+    require('./authController').sendSession(res, user)
+  } catch {
+    res.status(500).json({ message: 'Failed to change password' })
   }
-  try {
-    const user = await User.findById(req.user._id)
-    const idx  = user.continueWatching.findIndex(m => m.movieId === Number(movieId))
-    if (idx >= 0) {
-      user.continueWatching[idx].progress  = Math.min(100, Math.max(0, progress))
-      user.continueWatching[idx].updatedAt = new Date()
-    } else {
-      user.continueWatching.unshift({ movieId: Number(movieId), title, poster, progress })
-      if (user.continueWatching.length > 20) user.continueWatching.pop()
-    }
-    await user.save()
-    res.json({ message: 'Progress saved' })
-  } catch (e) { res.status(500).json({ message: 'Failed to save progress' }) }
 }
 
-const addRecentlyViewed = async (req, res) => {
-  const { movieId, title, poster } = req.body
-  if (!movieId) return res.status(400).json({ message: 'movieId required' })
-  try {
-    const user = await User.findById(req.user._id)
-    user.recentlyViewed = user.recentlyViewed.filter(m => m.movieId !== Number(movieId))
-    user.recentlyViewed.unshift({ movieId: Number(movieId), title, poster })
-    if (user.recentlyViewed.length > 30) user.recentlyViewed.pop()
-    await user.save()
-    res.json({ message: 'Saved' })
-  } catch (e) { res.status(500).json({ message: 'Failed to save' }) }
-}
-
-module.exports = { getProfile, updateProfile, updateContinueWatching, addRecentlyViewed }
+module.exports = { getProfile, updateProfile, changePassword }

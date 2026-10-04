@@ -92,7 +92,7 @@ export default function AnimatedPosterCard({ movie, type = 'movie', size = 'md',
             ? `perspective(600px) rotateX(${tiltX}deg) rotateY(${tiltY}deg) scale(1.05) translateZ(20px)`
             : 'perspective(600px) rotateX(0) rotateY(0) scale(1)',
           boxShadow: isHovered
-            ? `0 20px 60px rgba(0,0,0,0.7), 0 0 30px rgba(20,184,166,0.15)`
+            ? `0 20px 60px rgba(0,0,0,0.7), 0 0 30px rgba(229,9,20,0.15)`
             : '0 4px 20px rgba(0,0,0,0.4)',
           willChange: 'transform',
         }}>
@@ -140,7 +140,7 @@ export default function AnimatedPosterCard({ movie, type = 'movie', size = 'md',
         )}
 
         {/* Gradient overlay */}
-        <div className={`absolute inset-0 bg-gradient-to-t from-[#07080c] via-transparent to-transparent transition-opacity duration-300 ${isHovered ? 'opacity-100' : 'opacity-50'}`} />
+        <div className={`absolute inset-0 bg-gradient-to-t from-[#0f131c] via-transparent to-transparent transition-opacity duration-300 ${isHovered ? 'opacity-100' : 'opacity-50'}`} />
 
         {/* Top badges */}
         {rt >= 8 && (
@@ -164,13 +164,13 @@ export default function AnimatedPosterCard({ movie, type = 'movie', size = 'md',
         {/* Bottom info — slides on hover */}
         <div className={`absolute bottom-0 left-0 right-0 p-2 z-10 transition-all duration-300 ${isHovered ? 'translate-y-0 opacity-100' : 'translate-y-full opacity-0'}`}>
           <p className="text-white text-xs font-semibold line-clamp-2 mb-1.5 text-shadow">{title}</p>
-          {yr && <p className="text-slate-400 text-[10px] mb-2">{yr}</p>}
+          {yr && <p className="text-ink-muted text-[10px] mb-2">{yr}</p>}
           <button
             onClick={e => {
               e.stopPropagation()
               navigate(mType==='tv' ? `/player/tv/${movie.id}?season=1&episode=1` : `/player/movie/${movie.id}`)
             }}
-            className="w-full bg-brand text-dark text-[11px] font-bold py-1.5 rounded-lg hover:bg-brand-light transition-colors active:scale-95">
+            className="w-full bg-brand text-white text-[11px] font-bold py-1.5 rounded-lg hover:bg-brand-light transition-colors active:scale-95">
             ▶ Play
           </button>
         </div>

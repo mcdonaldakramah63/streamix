@@ -19,7 +19,16 @@ const SUSPICIOUS_PATTERNS = [
   /curl\s+http/i,
 ]
 
+// Pass-through proxies carry arbitrary third-party URLs (signed CDN query strings
+// regularly trip the patterns below), so they are validated in their controllers instead.
+const EXEMPT = ['/stream/proxy', '/download/file', '/admin/library/import']
+
 const suspiciousDetector = (req, res, next) => {
+  if (EXEMPT.some(p => req.path.startsWith(p))) return next()
+  // Base64 photo uploads are validated by byte signature in utils/avatarStore
+  if (/^\/profiles\/[a-f0-9]{24}\/avatar$/.test(req.path)) return next()
+  // Library file links carry a signed token (checked in libraryController.file)
+  if (/^\/library\/[a-f0-9]{24}\/file$/.test(req.path)) return next()
   const toCheck = [
     JSON.stringify(req.body   || {}),
     JSON.stringify(req.query  || {}),

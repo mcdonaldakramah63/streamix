@@ -1,7 +1,7 @@
-// frontend/src/stores/watchlistStore.ts — FULL REPLACEMENT
-// FIX: correct API request body fields, proper auth check, optimistic rollback on failure
+// frontend/src/stores/watchlistStore.ts — optimistic watchlist synced with the backend
 import { create } from 'zustand'
 import api from '../services/api'
+import { useAuthStore } from '../context/authStore'
 
 export interface WLItem {
   movieId:  number
@@ -28,23 +28,21 @@ interface WLState {
 
 const LS_KEY = 'streamix_watchlist_v2'
 
-function loadLocal(): WLItem[] {
+const loadLocal = (): WLItem[] => {
   try { return JSON.parse(localStorage.getItem(LS_KEY) || '[]') } catch { return [] }
 }
-function saveLocal(items: WLItem[]) {
-  try { localStorage.setItem(LS_KEY, JSON.stringify(items)) } catch {}
+const saveLocal = (items: WLItem[]) => {
+  try { localStorage.setItem(LS_KEY, JSON.stringify(items)) } catch { /* quota */ }
 }
-function getToken(): string | null {
-  try { return JSON.parse(localStorage.getItem('streamix_user') || '{}')?.token || null } catch { return null }
-}
+const loggedIn = () => !!useAuthStore.getState().user
 
 export const useWatchlistStore = create<WLState>((set, get) => ({
-  items:   loadLocal(),
+  items:   loggedIn() ? loadLocal() : [],
   loading: false,
   synced:  false,
 
   fetch: async () => {
-    if (!getToken()) { set({ items: loadLocal(), synced: true }); return }
+    if (!loggedIn()) { set({ items: [], synced: true }); return }
     set({ loading: true })
     try {
       const { data } = await api.get('/watchlist')
@@ -55,62 +53,47 @@ export const useWatchlistStore = create<WLState>((set, get) => ({
         backdrop: d.backdrop || '',
         rating:   Number(d.rating) || 0,
         year:     d.year     || '',
-        type:     d.type     || 'movie',
-        addedAt:  d.addedAt  ? new Date(d.addedAt).getTime() : Date.now(),
+        type:     d.type === 'tv' ? 'tv' : 'movie',
+        addedAt:  d.addedAt ? new Date(d.addedAt).getTime() : Date.now(),
       }))
       saveLocal(items)
       set({ items, synced: true })
     } catch (e: any) {
       console.warn('[WL] fetch failed:', e?.response?.status)
-      set({ items: loadLocal(), synced: true })
+      set({ synced: true })
     } finally { set({ loading: false }) }
   },
 
   add: async (item) => {
-    // Optimistic add
-    if (get().isIn(item.movieId)) return
+    if (!loggedIn() || get().isIn(item.movieId)) return
     const entry: WLItem = { ...item, addedAt: Date.now() }
     set(s => { const items = [entry, ...s.items]; saveLocal(items); return { items } })
 
-    if (!getToken()) return
     try {
-      await api.post('/watchlist', {
-        movieId:  entry.movieId,
-        title:    entry.title,
-        poster:   entry.poster   || '',
-        backdrop: entry.backdrop || '',
-        rating:   entry.rating   || 0,
-        year:     entry.year     || '',
-        type:     entry.type     || 'movie',
-      })
+      await api.post('/watchlist', { ...entry, type: entry.type || 'movie' })
     } catch (e: any) {
-      const status = e?.response?.status
-      if (status !== 409) {
-        // Rollback
+      if (e?.response?.status !== 409) {
         set(s => { const items = s.items.filter(i => i.movieId !== item.movieId); saveLocal(items); return { items } })
       }
-      console.warn('[WL] add failed:', status)
+      console.warn('[WL] add failed:', e?.response?.status)
     }
   },
 
   remove: async (movieId) => {
+    if (!loggedIn()) return
     const prev = get().items
     set(s => { const items = s.items.filter(i => i.movieId !== movieId); saveLocal(items); return { items } })
-
-    if (!getToken()) return
     try {
       await api.delete(`/watchlist/${movieId}`)
     } catch (e: any) {
-      console.warn('[WL] remove failed:', e?.response?.status)
-      // Rollback
-      set(() => { saveLocal(prev); return { items: prev } })
+      // 404 means it's already gone server-side — keep the removal
+      if (e?.response?.status !== 404) { saveLocal(prev); set({ items: prev }) }
     }
   },
 
   toggle: async (item) => {
-    const { isIn, add, remove } = get()
-    if (isIn(item.movieId)) await remove(item.movieId)
-    else                     await add(item)
+    if (get().isIn(item.movieId)) await get().remove(item.movieId)
+    else                          await get().add(item)
   },
 
   isIn:  (movieId) => get().items.some(i => i.movieId === movieId),

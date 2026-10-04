@@ -24,7 +24,7 @@ export default function TrailerModal({ videoKey, title, onClose }: Props) {
     <div
       ref={overlayRef}
       className="fixed inset-0 z-[100] flex items-center justify-center p-4 sm:p-8"
-      style={{ background: 'rgba(7,8,12,0.95)', backdropFilter:'blur(20px)' }}
+      style={{ background: 'rgba(15,19,28,0.95)', backdropFilter:'blur(20px)' }}
       onClick={e => { if (e.target === overlayRef.current) onClose() }}>
 
       <div className="relative w-full max-w-4xl animate-scale-in">
@@ -32,15 +32,15 @@ export default function TrailerModal({ videoKey, title, onClose }: Props) {
         {/* Header */}
         <div className="flex items-start justify-between mb-3 sm:mb-4 px-1">
           <div>
-            <p className="text-[10px] font-bold uppercase tracking-widest text-slate-600 mb-1">Official Trailer</p>
+            <p className="text-[10px] font-bold uppercase tracking-widest text-ink-faint mb-1">Official Trailer</p>
             <h2 className="font-bold text-white text-base sm:text-xl leading-tight line-clamp-1"
-              style={{ fontFamily:'Syne, sans-serif' }}>
+              style={{ fontFamily:'Plus Jakarta Sans, sans-serif' }}>
               {title}
             </h2>
           </div>
           <button
             onClick={onClose}
-            className="flex-shrink-0 ml-4 w-9 h-9 rounded-full glass border border-dark-border flex items-center justify-center text-slate-400 hover:text-white hover:border-brand/50 transition-all">
+            className="flex-shrink-0 ml-4 w-9 h-9 rounded-full glass border border-dark-border flex items-center justify-center text-ink-muted hover:text-white hover:border-brand/50 transition-all">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
               <path d="M18 6 6 18M6 6l12 12"/>
             </svg>
@@ -58,8 +58,8 @@ export default function TrailerModal({ videoKey, title, onClose }: Props) {
           />
         </div>
 
-        <p className="text-center text-[11px] text-slate-700 mt-3">
-          Press <kbd className="px-1.5 py-0.5 rounded bg-dark-surface border border-dark-border text-slate-500 text-[10px]">ESC</kbd> or click outside to close
+        <p className="text-center text-[11px] text-ink-faint mt-3">
+          Press <kbd className="px-1.5 py-0.5 rounded bg-dark-surface border border-dark-border text-ink-faint text-[10px]">ESC</kbd> or click outside to close
         </p>
       </div>
     </div>

@@ -1,0 +1,13 @@
+<resources>
+    <!-- Android 12+ system launch frame (Claude Design "Streamix Splash Screen", frame 1):
+         the prism mark in a dark circle on Obsidian Surface. The app's own splash continues from it. -->
+    <style name="Theme.Streamix" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/obsidian</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@color/obsidian_void</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowSplashScreenBackground">@color/obsidian</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@drawable/ic_launcher_foreground</item>
+        <item name="android:windowSplashScreenIconBackgroundColor">@color/icon_bg</item>
+    </style>
+</resources>

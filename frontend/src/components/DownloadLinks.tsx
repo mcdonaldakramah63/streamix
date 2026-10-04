@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import axios from 'axios'
+import api from '../services/api'
 
 interface Torrent {
   quality: string
@@ -25,7 +25,7 @@ const Q_STYLE: Record<string, string> = {
   '2160p': 'border-purple-500/30 bg-purple-500/5 text-purple-300',
   '1080p': 'border-teal-500/30  bg-teal-500/5   text-teal-300',
   '720p':  'border-blue-500/30  bg-blue-500/5   text-blue-300',
-  '480p':  'border-slate-500/30 bg-slate-500/5  text-slate-300',
+  '480p':  'border-white/20/30 bg-slate-500/5  text-ink',
 }
 
 function buildMagnet(hash: string, title: string) {
@@ -52,7 +52,7 @@ export default function DownloadLinks({ title, imdbId, tmdbId, type, season = 1,
     setStatus('loading')
     setErrMsg('')
     try {
-      const { data } = await axios.get('/api/download', {
+      const { data } = await api.get('/download', {
         params: { imdbId, title, type, season, episode },
         timeout: 20000,
       })
@@ -79,7 +79,7 @@ export default function DownloadLinks({ title, imdbId, tmdbId, type, season = 1,
     setDlState(p => ({ ...p, [t.quality]: 'downloading' }))
     try {
       const filename = `${foundTitle} [${t.quality}].torrent`
-      const res = await axios.get('/api/download/file', {
+      const res = await api.get('/download/file', {
         params: { url: t.torrentUrl, filename },
         responseType: 'blob',
         timeout: 20000,
@@ -94,7 +94,7 @@ export default function DownloadLinks({ title, imdbId, tmdbId, type, season = 1,
       document.body.removeChild(a)
       URL.revokeObjectURL(objUrl)
     } catch {
-      window.open(t.torrentUrl, '_blank')
+      window.open(t.torrentUrl, '_blank', 'noopener,noreferrer')
     } finally {
       setDlState(p => ({ ...p, [t.quality]: 'done' }))
     }
@@ -104,8 +104,8 @@ export default function DownloadLinks({ title, imdbId, tmdbId, type, season = 1,
   if (status === 'idle') return (
     <div className="bg-dark-surface border border-dark-border rounded-xl p-5 text-center">
       <div className="text-3xl mb-2">⬇</div>
-      <p className="text-sm font-semibold text-slate-300 mb-1">{title}</p>
-      <p className="text-xs text-slate-500 mb-4">
+      <p className="text-sm font-semibold text-ink mb-1">{title}</p>
+      <p className="text-xs text-ink-faint mb-4">
         {type === 'tv' ? `Find episode ${epStr} downloads` : 'Find HD download links'}
       </p>
       <button onClick={findLinks} className="btn-primary px-8 py-2.5 text-sm">
@@ -118,8 +118,8 @@ export default function DownloadLinks({ title, imdbId, tmdbId, type, season = 1,
   if (status === 'loading') return (
     <div className="bg-dark-surface border border-dark-border rounded-xl p-5 text-center">
       <div className="w-8 h-8 border-2 border-dark-border border-t-brand rounded-full animate-spin mx-auto mb-3" />
-      <p className="text-sm text-slate-400">Trying YTS mirrors...</p>
-      <p className="text-xs text-slate-600 mt-1">This may take a few seconds</p>
+      <p className="text-sm text-ink-muted">Trying YTS mirrors...</p>
+      <p className="text-xs text-ink-faint mt-1">This may take a few seconds</p>
     </div>
   )
 
@@ -134,7 +134,7 @@ export default function DownloadLinks({ title, imdbId, tmdbId, type, season = 1,
         </p>
         {isNetworkErr ? (
           <>
-            <p className="text-xs text-slate-500">
+            <p className="text-xs text-ink-faint">
               Your server can't reach YTS. Search manually on these sites instead:
             </p>
             <div className="flex gap-2 flex-wrap">
@@ -144,14 +144,14 @@ export default function DownloadLinks({ title, imdbId, tmdbId, type, season = 1,
                 { n: 'Torrent Galaxy', u: `https://torrentgalaxy.to/torrents.php?search=${q}` },
               ].map(s => (
                 <a key={s.n} href={s.u} target="_blank" rel="noopener noreferrer"
-                  className="px-3 py-1.5 bg-dark-card border border-dark-border rounded-lg text-xs text-slate-400 hover:border-brand hover:text-brand transition-colors">
+                  className="px-3 py-1.5 bg-dark-card border border-dark-border rounded-lg text-xs text-ink-muted hover:border-brand hover:text-brand transition-colors">
                   {s.n} ↗
                 </a>
               ))}
             </div>
           </>
         ) : (
-          <p className="text-xs text-slate-500 font-mono bg-dark-card rounded p-2 break-all">{errMsg}</p>
+          <p className="text-xs text-ink-faint font-mono bg-dark-card rounded p-2 break-all">{errMsg}</p>
         )}
         <div className="flex gap-2">
           <button onClick={findLinks}               className="btn-primary text-xs px-4 py-2">Retry</button>
@@ -167,8 +167,8 @@ export default function DownloadLinks({ title, imdbId, tmdbId, type, season = 1,
     const ep = type === 'tv' ? `+${epStr}` : ''
     return (
       <div className="bg-dark-surface border border-dark-border rounded-xl p-5 space-y-3">
-        <p className="text-sm font-semibold text-slate-300">Not found for "{title}"</p>
-        <p className="text-xs text-slate-500">
+        <p className="text-sm font-semibold text-ink">Not found for "{title}"</p>
+        <p className="text-xs text-ink-faint">
           {type === 'tv' ? 'YTS only covers movies. Try these for TV episodes:' : 'Try searching manually:'}
         </p>
         <div className="flex gap-2 flex-wrap">
@@ -178,12 +178,12 @@ export default function DownloadLinks({ title, imdbId, tmdbId, type, season = 1,
             { n: 'Torrent Galaxy', u: `https://torrentgalaxy.to/torrents.php?search=${q}${ep}` },
           ].map(s => (
             <a key={s.n} href={s.u} target="_blank" rel="noopener noreferrer"
-              className="px-3 py-1.5 bg-dark-card border border-dark-border rounded-lg text-xs text-slate-400 hover:border-brand hover:text-brand transition-colors">
+              className="px-3 py-1.5 bg-dark-card border border-dark-border rounded-lg text-xs text-ink-muted hover:border-brand hover:text-brand transition-colors">
               {s.n} ↗
             </a>
           ))}
         </div>
-        <button onClick={() => setStatus('idle')} className="text-xs text-slate-600 hover:text-slate-400 transition-colors">← Back</button>
+        <button onClick={() => setStatus('idle')} className="text-xs text-ink-faint hover:text-ink-muted transition-colors">← Back</button>
       </div>
     )
   }
@@ -194,10 +194,10 @@ export default function DownloadLinks({ title, imdbId, tmdbId, type, season = 1,
       <div className="flex items-start justify-between mb-4">
         <div>
           <p className="text-sm font-bold text-white">{foundTitle}</p>
-          <p className="text-xs text-slate-500 mt-0.5">{torrents.length} quality options · YTS</p>
+          <p className="text-xs text-ink-faint mt-0.5">{torrents.length} quality options · YTS</p>
         </div>
         <button onClick={() => { setStatus('idle'); setTorrents([]) }}
-          className="text-slate-500 hover:text-white text-lg leading-none transition-colors">✕</button>
+          className="text-ink-faint hover:text-white text-lg leading-none transition-colors">✕</button>
       </div>
 
       <div className="space-y-2 mb-4">
@@ -220,7 +220,7 @@ export default function DownloadLinks({ title, imdbId, tmdbId, type, season = 1,
                 <button
                   onClick={() => downloadTorrent(t)}
                   disabled={dl === 'downloading'}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-brand text-dark text-xs font-bold hover:bg-brand-dark disabled:opacity-60 transition-all min-w-[90px] justify-center"
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-brand text-white text-xs font-bold hover:bg-brand-dark disabled:opacity-60 transition-all min-w-[90px] justify-center"
                 >
                   {dl === 'downloading' ? (
                     <><span className="w-3 h-3 border border-dark border-t-transparent rounded-full animate-spin" /> Saving...</>
@@ -238,8 +238,8 @@ export default function DownloadLinks({ title, imdbId, tmdbId, type, season = 1,
       </div>
 
       <div className="border-t border-dark-border pt-3 space-y-1">
-        <p className="text-xs text-slate-600"><span className="text-slate-400 font-medium">⬇ Download</span> — saves .torrent file, open with qBittorrent to get the video</p>
-        <p className="text-xs text-slate-600"><span className="text-slate-400 font-medium">🧲 Magnet</span> — opens qBittorrent / uTorrent directly</p>
+        <p className="text-xs text-ink-faint"><span className="text-ink-muted font-medium">⬇ Download</span> — saves .torrent file, open with qBittorrent to get the video</p>
+        <p className="text-xs text-ink-faint"><span className="text-ink-muted font-medium">🧲 Magnet</span> — opens qBittorrent / uTorrent directly</p>
       </div>
     </div>
   )

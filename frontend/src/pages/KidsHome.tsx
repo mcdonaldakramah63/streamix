@@ -1,10 +1,12 @@
 // frontend/src/pages/KidsHome.tsx — FULL REPLACEMENT
 // Design: Warm cinematic kids aesthetic — rich gradients, large posters, joyful
-// PIN Fix: Uses ref-accumulator pattern — no stale closures, always correct value
-import { useEffect, useState, useRef } from 'react'
+// Exit returns to the profile picker; adult profiles are guarded by their own server-checked PINs
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import api from '../services/api'
 import { useProfileStore } from '../stores/profileStore'
+import ProfileAvatar from '../components/avatar/ProfileAvatar'
+import { useKidsStore } from '../stores/kidsStore'
 
 // ── Types ────────────────────────────────────────────────────────────────────
 interface KidsMovie {
@@ -16,274 +18,28 @@ interface KidsMovie {
 }
 
 // ── Constants ────────────────────────────────────────────────────────────────
-const PARENT_PIN = '1234'
 const IMG = (p: string | null, s = 'w342') =>
   p ? `https://image.tmdb.org/t/p/${s}${p}` : ''
 
-const GENRES = [
-  { id: 16,    label: 'Cartoons',  emoji: '🎨', bg: '#FF6B6B', light: '#FFE5E5' },
-  { id: 10751, label: 'Family',    emoji: '🏠', bg: '#4ECDC4', light: '#E0F9F8' },
-  { id: 12,    label: 'Adventure', emoji: '🗺️', bg: '#45B7D1', light: '#E0F3F8' },
-  { id: 35,    label: 'Comedy',    emoji: '😂', bg: '#96CEB4', light: '#E6F5EE' },
-  { id: 14,    label: 'Fantasy',   emoji: '✨', bg: '#DDA0DD', light: '#F5EAF5' },
-  { id: 10762, label: 'Kids',      emoji: '⭐', bg: '#FFD93D', light: '#FFF8DC' },
+/** Sections come from /movies/kids-browse — the server applies the age-rating filter */
+interface Section { id: string; label: string; emoji: string; bg: string }
+const SECTIONS: Section[] = [
+  { id: 'shows',           label: 'Kids Shows',   emoji: '⭐', bg: '#FFD93D' },
+  { id: 'cartoons',        label: 'Cartoons',     emoji: '🎨', bg: '#FF6B6B' },
+  { id: 'anime',           label: 'Anime',        emoji: '🍥', bg: '#FF8FB1' },
+  { id: 'anime-movies',    label: 'Anime Movies', emoji: '🌸', bg: '#C3A6FF' },
+  { id: 'animated-movies', label: 'Animated Movies', emoji: '🎬', bg: '#45B7D1' },
+  { id: 'family',          label: 'Family',       emoji: '🏠', bg: '#4ECDC4' },
+  { id: 'family-shows',    label: 'Family Shows', emoji: '📺', bg: '#7FD8BE' },
+  { id: 'adventure',       label: 'Adventure',    emoji: '🗺️', bg: '#5DADE2' },
+  { id: 'comedy',          label: 'Comedy',       emoji: '😂', bg: '#96CEB4' },
+  { id: 'fantasy',         label: 'Fantasy',      emoji: '✨', bg: '#DDA0DD' },
 ]
+const ALL: Section = { id: 'all', label: 'All', emoji: '🌈', bg: '#FFD93D' }
+const HOME_ROWS = ['shows', 'anime', 'cartoons', 'animated-movies', 'anime-movies', 'family']
 
-// ── PIN Modal ─────────────────────────────────────────────────────────────────
-function PinModal({
-  onSuccess,
-  onCancel,
-}: {
-  onSuccess: () => void
-  onCancel: () => void
-}) {
-  // THE FIX: acc is the single source of truth for the PIN string.
-  // It is a ref — always up-to-date, never stale, no closure issues.
-  const acc = useRef('')
-  const [display, setDisplay]   = useState('')  // purely for rendering dots
-  const [error,   setError]     = useState('')
-  const [shaking, setShaking]   = useState(false)
-  const [success, setSuccess]   = useState(false)
-  const [locked,  setLocked]    = useState(false) // prevent double-submit
-
-  const wrong = () => {
-    acc.current = ''
-    setDisplay('')
-    setShaking(true)
-    setError('Incorrect PIN. Try again.')
-    setTimeout(() => setShaking(false), 600)
-  }
-
-  const pressKey = (key: string) => {
-    if (locked) return
-
-    if (key === '⌫') {
-      if (acc.current.length === 0) return
-      acc.current = acc.current.slice(0, -1)
-      setDisplay(acc.current)
-      setError('')
-      return
-    }
-
-    if (acc.current.length >= 4) return
-    acc.current += key
-    setDisplay(acc.current)
-
-    // Check on 4th digit
-    if (acc.current.length === 4) {
-      const entered = acc.current          // capture NOW — always correct
-      setLocked(true)
-
-      setTimeout(() => {
-        if (entered === PARENT_PIN) {
-          setSuccess(true)
-          setTimeout(() => {
-            acc.current = ''
-            setDisplay('')
-            setLocked(false)
-            onSuccess()
-          }, 400)
-        } else {
-          setLocked(false)
-          wrong()
-        }
-      }, 180)                              // brief pause so 4th dot shows
-    }
-  }
-
-  // Physical keyboard
-  useEffect(() => {
-    const fn = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') { onCancel(); return }
-      if (e.key === 'Backspace') { pressKey('⌫'); return }
-      if (/^\d$/.test(e.key)) pressKey(e.key)
-    }
-    window.addEventListener('keydown', fn)
-    return () => window.removeEventListener('keydown', fn)
-  }, []) // pressKey reads from acc.current — always fresh, no deps needed
-
-  const NUMPAD = [
-    ['1','2','3'],
-    ['4','5','6'],
-    ['7','8','9'],
-    ['',  '0','⌫'],
-  ]
-
-  return (
-    <>
-      {/* Backdrop */}
-      <div
-        className="fixed inset-0 z-[300]"
-        style={{ background: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(16px)' }}
-        onClick={onCancel}
-      />
-
-      {/* Modal card */}
-      <div className="fixed inset-0 z-[301] flex items-center justify-center p-4 pointer-events-none">
-        <div
-          className={`pointer-events-auto w-full max-w-[340px] rounded-[32px] overflow-hidden ${shaking ? 'animate-shake' : ''}`}
-          style={{
-            background: 'linear-gradient(145deg, #161820 0%, #0f1117 100%)',
-            border: '1px solid rgba(255,255,255,0.08)',
-            boxShadow: '0 40px 80px rgba(0,0,0,0.6), 0 0 0 1px rgba(255,255,255,0.04)',
-          }}
-        >
-          {/* Header */}
-          <div className="px-8 pt-8 pb-6 text-center">
-            {/* Lock icon */}
-            <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl mb-5"
-              style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.08)' }}>
-              <svg width="26" height="26" viewBox="0 0 24 24" fill="none">
-                <rect x="5" y="11" width="14" height="10" rx="2" stroke="rgba(255,255,255,0.9)" strokeWidth="1.5"/>
-                <path d="M8 11V7a4 4 0 0 1 8 0v4" stroke="rgba(255,255,255,0.9)" strokeWidth="1.5" strokeLinecap="round"/>
-                <circle cx="12" cy="16" r="1.5" fill="rgba(255,255,255,0.9)"/>
-              </svg>
-            </div>
-
-            <h2 className="text-white font-bold text-xl mb-1.5 tracking-tight"
-              style={{ fontFamily: 'Syne, sans-serif' }}>
-              Parent Controls
-            </h2>
-            <p className="text-slate-500 text-sm">Enter your 4-digit PIN to continue</p>
-          </div>
-
-          {/* PIN dots */}
-          <div className="flex justify-center gap-4 px-8 mb-3">
-            {Array.from({ length: 4 }).map((_, i) => {
-              const filled   = i < display.length
-              const isActive = i === display.length - 1 && !success
-
-              return (
-                <div
-                  key={i}
-                  className="transition-all duration-200"
-                  style={{
-                    width:        52,
-                    height:       52,
-                    borderRadius: 14,
-                    display:      'flex',
-                    alignItems:   'center',
-                    justifyContent: 'center',
-                    background: filled
-                      ? success
-                        ? 'rgba(34,197,94,0.15)'
-                        : 'rgba(20,184,166,0.12)'
-                      : 'rgba(255,255,255,0.04)',
-                    border: filled
-                      ? success
-                        ? '1.5px solid rgba(34,197,94,0.5)'
-                        : '1.5px solid rgba(20,184,166,0.4)'
-                      : '1.5px solid rgba(255,255,255,0.08)',
-                    transform: isActive ? 'scale(1.06)' : 'scale(1)',
-                    boxShadow: filled
-                      ? success
-                        ? '0 0 16px rgba(34,197,94,0.2)'
-                        : '0 0 16px rgba(20,184,166,0.15)'
-                      : 'none',
-                  }}
-                >
-                  <div
-                    className="rounded-full transition-all duration-200"
-                    style={{
-                      width:      filled ? 12 : 8,
-                      height:     filled ? 12 : 8,
-                      background: filled
-                        ? success ? 'rgba(34,197,94,0.9)' : '#14b8a6'
-                        : 'rgba(255,255,255,0.12)',
-                    }}
-                  />
-                </div>
-              )
-            })}
-          </div>
-
-          {/* Error message — always takes space to avoid layout shift */}
-          <div className="text-center px-8 mb-4 h-6 flex items-center justify-center">
-            {error && (
-              <p className="text-red-400 text-sm font-medium flex items-center gap-1.5">
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor">
-                  <path d="M12 22C6.477 22 2 17.523 2 12S6.477 2 12 2s10 4.477 10 10-4.477 10-10 10zm-1-7v2h2v-2h-2zm0-8v6h2V7h-2z"/>
-                </svg>
-                {error}
-              </p>
-            )}
-          </div>
-
-          {/* Numpad */}
-          <div className="px-6 pb-6 grid grid-cols-3 gap-3">
-            {NUMPAD.flat().map((key, i) => {
-              if (!key) return <div key={i} />
-
-              const isBackspace = key === '⌫'
-
-              return (
-                <button
-                  key={i}
-                  onClick={() => pressKey(key)}
-                  disabled={locked}
-                  className="flex items-center justify-center transition-all duration-100 select-none active:scale-95"
-                  style={{
-                    height:       64,
-                    borderRadius: 16,
-                    background:   isBackspace
-                      ? 'rgba(239,68,68,0.08)'
-                      : 'rgba(255,255,255,0.05)',
-                    border:       isBackspace
-                      ? '1px solid rgba(239,68,68,0.2)'
-                      : '1px solid rgba(255,255,255,0.07)',
-                    fontSize:     isBackspace ? 14 : 22,
-                    fontWeight:   700,
-                    color:        isBackspace ? 'rgba(239,68,68,0.8)' : 'rgba(255,255,255,0.9)',
-                    fontFamily:   'Syne, sans-serif',
-                    touchAction:  'manipulation',
-                    cursor:       'pointer',
-                  }}
-                  onMouseEnter={e => {
-                    if (!isBackspace) (e.currentTarget as HTMLButtonElement).style.background = 'rgba(255,255,255,0.09)'
-                  }}
-                  onMouseLeave={e => {
-                    (e.currentTarget as HTMLButtonElement).style.background = isBackspace
-                      ? 'rgba(239,68,68,0.08)' : 'rgba(255,255,255,0.05)'
-                  }}
-                >
-                  {isBackspace ? (
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-                      <path d="M21 4H8l-7 8 7 8h13a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2z"/>
-                      <line x1="18" y1="9" x2="12" y2="15"/><line x1="12" y1="9" x2="18" y2="15"/>
-                    </svg>
-                  ) : key}
-                </button>
-              )
-            })}
-          </div>
-
-          {/* Cancel */}
-          <div className="px-6 pb-7">
-            <button
-              onClick={onCancel}
-              className="w-full py-3 text-sm text-slate-500 hover:text-slate-300 transition-colors font-medium tracking-wide"
-            >
-              Cancel
-            </button>
-          </div>
-        </div>
-      </div>
-
-      <style>{`
-        @keyframes shake {
-          0%,100% { transform: translateX(0) }
-          10%      { transform: translateX(-12px) }
-          25%      { transform: translateX(10px) }
-          40%      { transform: translateX(-8px) }
-          55%      { transform: translateX(6px) }
-          70%      { transform: translateX(-4px) }
-          85%      { transform: translateX(2px) }
-        }
-        .animate-shake { animation: shake 0.55s cubic-bezier(.36,.07,.19,.97) both }
-      `}</style>
-    </>
-  )
-}
+const browse = (section: string, page = 1) =>
+  api.get('/movies/kids-browse', { params: { section, page } }).then(r => r.data as { results: KidsMovie[]; total_pages: number })
 
 // ── Movie Card ────────────────────────────────────────────────────────────────
 function KidsMovieCard({ movie }: { movie: KidsMovie }) {
@@ -346,53 +102,131 @@ function KidsMovieCard({ movie }: { movie: KidsMovie }) {
   )
 }
 
+// ── Horizontal row on the "All" view ─────────────────────────────────────────
+/** Hides titles a parent blocked */
+function useAllowed() {
+  useKidsStore(s => s.status) // re-render when the lists change
+  const allowed = useKidsStore.getState().titleAllowed
+  return (list: KidsMovie[]) => list.filter(m => allowed(m.media_type === 'tv' ? 'tv' : 'movie', m.id))
+}
+
+function KidsRow({ section, onSeeAll, onLoaded }: { section: Section; onSeeAll: () => void; onLoaded?: (items: KidsMovie[]) => void }) {
+  const [raw, setItems] = useState<KidsMovie[] | null>(null)
+  const filter = useAllowed()
+  const items = raw && filter(raw)
+  useEffect(() => {
+    let live = true
+    browse(section.id).then(d => { if (live) { setItems(d.results); onLoaded?.(d.results) } }).catch(() => live && setItems([]))
+    return () => { live = false }
+  }, [section.id]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  if (items && !items.length) return null
+  return (
+    <section>
+      <div className="flex items-center gap-2 mb-3">
+        <div className="w-1 h-5 rounded-full" style={{ background: section.bg }} />
+        <h2 className="text-white font-bold text-base tracking-tight" style={{ fontFamily: 'Plus Jakarta Sans, sans-serif' }}>
+          {section.emoji} {section.label}
+        </h2>
+        <button onClick={onSeeAll} className="ml-auto text-xs font-bold px-3 py-1.5 rounded-xl active:scale-95"
+          style={{ color: section.bg, background: 'rgba(255,255,255,0.04)' }}>
+          See all ›
+        </button>
+      </div>
+      <div className="flex gap-3 overflow-x-auto scrollbar-hide pb-1" style={{ scrollbarWidth: 'none' }}>
+        {(items || Array.from({ length: 8 }, () => null)).map((m, i) => (
+          <div key={m ? `${m.media_type}-${m.id}` : i} className="flex-shrink-0 w-28 sm:w-36">
+            {m ? <KidsMovieCard movie={m} />
+              : <div className="rounded-[18px] animate-pulse" style={{ aspectRatio: '2/3', background: 'rgba(255,255,255,0.06)' }} />}
+          </div>
+        ))}
+      </div>
+    </section>
+  )
+}
+
 // ── Main KidsHome ─────────────────────────────────────────────────────────────
 export default function KidsHome() {
   const navigate = useNavigate()
-  const { activeProfile, profiles, setActive } = useProfileStore()
+  const { activeProfile, setActive } = useProfileStore()
 
-  const [movies,   setMovies]   = useState<KidsMovie[]>([])
-  const [tvShows,  setTVShows]  = useState<KidsMovie[]>([])
-  const [genre,    setGenre]    = useState(GENRES[0])
-  const [loading,  setLoading]  = useState(true)
-  const [showPin,  setShowPin]  = useState(false)
+  const [section,  setSection]  = useState<Section>(ALL)
+  const [grid,     setGrid]     = useState<KidsMovie[]>([])
+  const [page,     setPage]     = useState(1)
+  const [pages,    setPages]    = useState(1)
+  const [loading,  setLoading]  = useState(false)
   const [featured, setFeatured] = useState<KidsMovie | null>(null)
+  const [query,    setQuery]    = useState('')
+  const [results,  setResults]  = useState<KidsMovie[] | null>(null)
+  const [searching, setSearching] = useState(false)
+  const searchSeq = useRef(0)
 
   const profileName   = activeProfile?.name   || 'Viewer'
   const profileAvatar = activeProfile?.avatar  || '⭐'
   const profileColor  = activeProfile?.color   || '#FFD93D'
+  const accent = section.bg
+  const filter = useAllowed()
+  const kids = useKidsStore(s => s.status)
+  const [picked, setPicked] = useState<KidsMovie[] | null>(null)
 
+  // "Only allowed titles" mode: show just the parent's picks
   useEffect(() => {
-    setLoading(true)
-    setMovies([])
-    setTVShows([])
+    if (!kids?.allowedOnly) { setPicked(null); return }
+    Promise.all(kids.allowedTitles.slice(0, 60).map(key => {
+      const [type, id] = key.split(':')
+      return api.get(type === 'tv' ? `/movies/tv/${id}` : `/movies/${id}`)
+        .then(r => ({ ...r.data, media_type: type } as KidsMovie)).catch(() => null)
+    })).then(list => setPicked(list.filter(Boolean) as KidsMovie[]))
+  }, [kids?.allowedOnly, kids?.allowedTitles?.join(',')]) // eslint-disable-line react-hooks/exhaustive-deps
 
-    const base = {
-      with_genres:      `${genre.id},10751`,
-      sort_by:          'popularity.desc',
-      'vote_count.gte': 30,
-      page:             1,
-    }
-
-    Promise.all([
-      api.get('/movies/discover', { params: { ...base, type: 'movie' } }),
-      api.get('/movies/discover', { params: { ...base, type: 'tv'    } }),
-    ])
-      .then(([m, t]) => {
-        const ms = (m.data.results || []).slice(0, 20).map((x: any) => ({ ...x, media_type: 'movie' }))
-        const ts = (t.data.results || []).slice(0, 12).map((x: any) => ({ ...x, media_type: 'tv'   }))
-        setMovies(ms)
-        setTVShows(ts)
-        if (ms.length > 0) setFeatured(ms[Math.floor(Math.random() * Math.min(3, ms.length))])
-      })
-      .catch(() => {})
+  // One category: a grid that loads more pages on demand
+  useEffect(() => {
+    if (section.id === 'all') return
+    setGrid([]); setPage(1); setLoading(true)
+    browse(section.id, 1)
+      .then(d => { setGrid(d.results); setPages(d.total_pages) })
+      .catch(() => setGrid([]))
       .finally(() => setLoading(false))
-  }, [genre.id])
+  }, [section.id])
 
-  const handleExitSuccess = () => {
-    setShowPin(false)
-    const adult = profiles.find(p => !p.isKids)
-    if (adult) setActive(adult)
+  const loadMore = () => {
+    const next = page + 1
+    setLoading(true)
+    browse(section.id, next)
+      .then(d => {
+        setGrid(g => [...g, ...d.results.filter(m => !g.some(x => x.id === m.id && x.media_type === m.media_type))])
+        setPage(next)
+      })
+      .finally(() => setLoading(false))
+  }
+
+  // Search (kid-safe on the server)
+  useEffect(() => {
+    const q = query.trim()
+    if (q.length < 2) { setResults(null); setSearching(false); return }
+    const n = ++searchSeq.current
+    setSearching(true)
+    const t = setTimeout(() => {
+      api.get('/movies/kids-search', { params: { query: q } })
+        .then(r => { if (n === searchSeq.current) setResults(r.data.results || []) })
+        .catch(() => { if (n === searchSeq.current) setResults([]) })
+        .finally(() => { if (n === searchSeq.current) setSearching(false) })
+    }, 400)
+    return () => clearTimeout(t)
+  }, [query])
+
+  const onFirstRow = useCallback((items: KidsMovie[]) => {
+    setFeatured(f => f || items[Math.floor(Math.random() * Math.min(4, items.length))] || null)
+  }, [])
+
+  const playFeatured = () => {
+    if (!featured) return
+    navigate(featured.media_type === 'tv' ? `/player/tv/${featured.id}?season=1&episode=1` : `/player/movie/${featured.id}`)
+  }
+
+  // Leaving kids mode returns to "Who's watching?" — adult profiles are protected by their own PINs
+  const exitKids = async () => {
+    await setActive(null)
     navigate('/', { replace: true })
   }
 
@@ -418,7 +252,7 @@ export default function KidsHome() {
       >
         {/* Logo */}
         <div className="flex items-center gap-2.5">
-          <span className="text-xl font-black tracking-tight text-white" style={{ fontFamily: 'Syne, sans-serif' }}>
+          <span className="text-xl font-black tracking-tight text-white" style={{ fontFamily: 'Plus Jakarta Sans, sans-serif' }}>
             STREAMIX
           </span>
           <span className="text-[10px] font-black tracking-widest px-2 py-1 rounded-full"
@@ -429,18 +263,19 @@ export default function KidsHome() {
 
         {/* Profile + exit */}
         <div className="flex items-center gap-3">
+          {kids?.minutesLeft != null && (
+            <span className="text-xs font-bold px-2.5 py-1 rounded-full" title="Screen time left today"
+              style={{ background: kids.minutesLeft <= 10 ? '#FF6B6B33' : 'rgba(255,255,255,0.06)', color: kids.minutesLeft <= 10 ? '#FF6B6B' : 'rgba(255,255,255,0.7)' }}>
+              ⏱ {kids.minutesLeft} min left
+            </span>
+          )}
           <div className="flex items-center gap-2">
-            <div
-              className="w-8 h-8 rounded-xl flex items-center justify-center text-base font-bold flex-shrink-0"
-              style={{ background: profileColor + '22', border: `1.5px solid ${profileColor}44` }}
-            >
-              {profileAvatar}
-            </div>
+            <ProfileAvatar p={activeProfile || { avatar: profileAvatar, color: profileColor }} className="w-8 h-8 rounded-xl" emojiSize="text-base" />
             <span className="text-sm font-semibold text-white/80 hidden sm:block">{profileName}</span>
           </div>
 
           <button
-            onClick={() => setShowPin(true)}
+            onClick={exitKids}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition-all active:scale-95"
             style={{
               background: 'rgba(255,255,255,0.06)',
@@ -452,59 +287,76 @@ export default function KidsHome() {
               <rect x="5" y="11" width="14" height="10" rx="2"/>
               <path d="M8 11V7a4 4 0 0 1 8 0v4" strokeLinecap="round"/>
             </svg>
-            <span>Exit Kids</span>
+            <span>Switch profile</span>
           </button>
         </div>
       </header>
 
+      {/* ── Search ── */}
+      <div className={`px-4 sm:px-6 pt-5 ${kids?.allowedOnly ? 'hidden' : ''}`}>
+        <div className="relative max-w-2xl">
+          <svg className="absolute left-4 top-1/2 -translate-y-1/2 pointer-events-none" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.45)" strokeWidth="2.2" strokeLinecap="round">
+            <circle cx="11" cy="11" r="7" /><path d="M20 20l-3.5-3.5" />
+          </svg>
+          <input value={query} onChange={e => setQuery(e.target.value)} type="text" enterKeyHint="search" autoComplete="off"
+            placeholder="Search cartoons, anime, movies…" aria-label="Search shows and movies"
+            className="w-full h-14 pl-12 pr-12 rounded-2xl text-base font-semibold text-white placeholder-white/35 outline-none transition-all focus:ring-2"
+            style={{ background: 'rgba(255,255,255,0.07)', border: '1.5px solid rgba(255,255,255,0.08)', ['--tw-ring-color' as any]: accent }} />
+          {query && (
+            <button onClick={() => setQuery('')} aria-label="Clear search"
+              className="absolute right-3 top-1/2 -translate-y-1/2 w-8 h-8 rounded-full flex items-center justify-center text-white/60 hover:text-white"
+              style={{ background: 'rgba(255,255,255,0.08)' }}>✕</button>
+          )}
+        </div>
+      </div>
+
+      {picked ? (
+        <div className="px-4 sm:px-6 py-6 pb-16">
+          <h2 className="text-white font-bold text-base mb-4" style={{ fontFamily: 'Plus Jakarta Sans, sans-serif' }}>⭐ Picked for you by your grown-ups</h2>
+          {picked.length ? (
+            <div className="grid grid-cols-3 sm:grid-cols-5 md:grid-cols-6 lg:grid-cols-8 gap-3">
+              {picked.map(m => <KidsMovieCard key={`${m.media_type}-${m.id}`} movie={m} />)}
+            </div>
+          ) : <p className="text-white/40 text-sm">Nothing picked yet — ask a grown-up to add some shows!</p>}
+        </div>
+      ) : results !== null || searching ? (
+        /* ── Search results ── */
+        <div className="px-4 sm:px-6 py-6 pb-16">
+          <p className="text-white/60 text-sm font-semibold mb-4">
+            {searching ? 'Looking…' : results!.length ? `Found ${results!.length} for “${query.trim()}”` : `Nothing found for “${query.trim()}” — try another name`}
+          </p>
+          {searching ? <Skeleton /> : (
+            <div className="grid grid-cols-3 sm:grid-cols-5 md:grid-cols-6 lg:grid-cols-8 gap-3">
+              {filter(results!).map(m => <KidsMovieCard key={`${m.media_type}-${m.id}`} movie={m} />)}
+            </div>
+          )}
+        </div>
+      ) : (<>
+
       {/* ── Featured Banner ── */}
-      {featured && !loading && (
+      {featured && section.id === 'all' && (
         <div className="relative mx-4 sm:mx-6 mt-5 overflow-hidden" style={{ borderRadius: 24 }}>
-          {/* Background image */}
           <div className="absolute inset-0">
             {featured.poster_path && (
-              <img
-                src={IMG(featured.poster_path, 'w780')}
-                alt=""
-                className="w-full h-full object-cover"
-                style={{ filter: 'blur(2px) brightness(0.45)', transform: 'scale(1.08)' }}
-              />
+              <img src={IMG(featured.poster_path, 'w780')} alt="" className="w-full h-full object-cover"
+                style={{ filter: 'blur(2px) brightness(0.45)', transform: 'scale(1.08)' }} />
             )}
-            <div className="absolute inset-0" style={{
-              background: `linear-gradient(135deg, ${genre.bg}33 0%, rgba(10,12,20,0.85) 100%)`
-            }} />
+            <div className="absolute inset-0" style={{ background: `linear-gradient(135deg, ${accent}33 0%, rgba(10,12,20,0.85) 100%)` }} />
           </div>
-
-          {/* Content */}
           <div className="relative flex items-center gap-5 p-5 sm:p-7" style={{ minHeight: 160 }}>
-            {/* Poster */}
             {featured.poster_path && (
-              <img
-                src={IMG(featured.poster_path)}
-                alt=""
-                className="flex-shrink-0 shadow-2xl"
-                style={{ width: 90, aspectRatio: '2/3', borderRadius: 14, objectFit: 'cover' }}
-              />
+              <img src={IMG(featured.poster_path)} alt="" className="flex-shrink-0 shadow-2xl"
+                style={{ width: 90, aspectRatio: '2/3', borderRadius: 14, objectFit: 'cover' }} />
             )}
-            {/* Text */}
             <div className="flex-1 min-w-0">
-              <p className="text-xs font-bold uppercase tracking-widest mb-2 opacity-70" style={{ color: genre.bg }}>
-                {genre.emoji} Featured Pick
-              </p>
-              <h2
-                className="text-white font-black text-xl sm:text-2xl mb-3 leading-tight"
-                style={{ fontFamily: 'Syne, sans-serif' }}
-              >
+              <p className="text-xs font-bold uppercase tracking-widest mb-2 opacity-70" style={{ color: accent }}>⭐ Featured Pick</p>
+              <h2 className="text-white font-black text-xl sm:text-2xl mb-3 leading-tight" style={{ fontFamily: 'Plus Jakarta Sans, sans-serif' }}>
                 {featured.title || featured.name}
               </h2>
-              <button
-                onClick={() => navigate(`/player/movie/${featured.id}`)}
+              <button onClick={playFeatured}
                 className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-bold transition-all active:scale-95 hover:scale-105"
-                style={{ background: genre.bg, color: '#0a0c14' }}
-              >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
-                  <polygon points="6,3 20,12 6,21"/>
-                </svg>
+                style={{ background: accent, color: '#0a0c14' }}>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><polygon points="6,3 20,12 6,21"/></svg>
                 Watch Now
               </button>
             </div>
@@ -512,69 +364,55 @@ export default function KidsHome() {
         </div>
       )}
 
-      {/* ── Genre Pills ── */}
-      <div className="flex gap-2.5 overflow-x-auto scrollbar-hide px-4 sm:px-6 py-5"
-        style={{ scrollbarWidth: 'none' }}>
-        {GENRES.map(g => {
-          const active = g.id === genre.id
+      {/* ── Category Pills ── */}
+      <div className="flex gap-2.5 overflow-x-auto scrollbar-hide px-4 sm:px-6 py-5" style={{ scrollbarWidth: 'none' }}>
+        {[ALL, ...SECTIONS].map(g => {
+          const active = g.id === section.id
           return (
-            <button
-              key={g.id}
-              onClick={() => setGenre(g)}
+            <button key={g.id} onClick={() => { setSection(g); window.scrollTo({ top: 0, behavior: 'smooth' }) }} aria-pressed={active}
               className="flex-shrink-0 flex items-center gap-2 px-4 py-2.5 rounded-2xl text-sm font-bold transition-all duration-200 active:scale-95"
               style={{
                 background: active ? g.bg : 'rgba(255,255,255,0.05)',
-                color:      active ? '#0a0c14' : 'rgba(255,255,255,0.55)',
+                color:      active ? '#0a0c14' : 'rgba(255,255,255,0.6)',
                 border:     active ? `1.5px solid ${g.bg}` : '1.5px solid rgba(255,255,255,0.07)',
                 boxShadow:  active ? `0 0 20px ${g.bg}44` : 'none',
-                transform:  active ? 'scale(1.04)' : 'scale(1)',
-              }}
-            >
-              <span>{g.emoji}</span>
-              <span>{g.label}</span>
+              }}>
+              <span>{g.emoji}</span><span>{g.label}</span>
             </button>
           )
         })}
       </div>
 
-      {/* ── Content sections ── */}
+      {/* ── Content ── */}
       <div className="px-4 sm:px-6 pb-16 space-y-8">
-
-        {/* Movies */}
-        <section>
-          <div className="flex items-center gap-2 mb-4">
-            <div className="w-1 h-5 rounded-full" style={{ background: genre.bg }} />
-            <h2 className="text-white font-bold text-base tracking-tight" style={{ fontFamily: 'Syne, sans-serif' }}>
-              Movies
-            </h2>
-            {!loading && <span className="text-xs text-white/25 ml-1">({movies.length})</span>}
-          </div>
-
-          {loading ? <Skeleton /> : movies.length > 0 ? (
-            <div className="grid grid-cols-4 sm:grid-cols-5 md:grid-cols-6 lg:grid-cols-8 gap-3">
-              {movies.map(m => <KidsMovieCard key={m.id} movie={m} />)}
-            </div>
-          ) : (
-            <div className="py-12 text-center">
-              <p className="text-4xl mb-3">🔍</p>
-              <p className="text-white/30 text-sm">Nothing here yet — try another category</p>
-            </div>
-          )}
-        </section>
-
-        {/* TV Shows */}
-        {!loading && tvShows.length > 0 && (
+        {section.id === 'all' ? (
+          HOME_ROWS.map((id, i) => {
+            const sec = SECTIONS.find(s => s.id === id)!
+            return <KidsRow key={id} section={sec} onSeeAll={() => setSection(sec)} onLoaded={i === 0 ? onFirstRow : undefined} />
+          })
+        ) : (
           <section>
-            <div className="flex items-center gap-2 mb-4">
-              <div className="w-1 h-5 rounded-full" style={{ background: genre.bg }} />
-              <h2 className="text-white font-bold text-base tracking-tight" style={{ fontFamily: 'Syne, sans-serif' }}>
-                Shows
-              </h2>
-              <span className="text-xs text-white/25 ml-1">({tvShows.length})</span>
-            </div>
-            <div className="grid grid-cols-4 sm:grid-cols-5 md:grid-cols-6 lg:grid-cols-8 gap-3">
-              {tvShows.map(t => <KidsMovieCard key={t.id} movie={t} />)}
-            </div>
+            {grid.length === 0 && loading ? <Skeleton /> : grid.length > 0 ? (
+              <>
+                <div className="grid grid-cols-3 sm:grid-cols-5 md:grid-cols-6 lg:grid-cols-8 gap-3">
+                  {filter(grid).map(m => <KidsMovieCard key={`${m.media_type}-${m.id}`} movie={m} />)}
+                </div>
+                {page < pages && (
+                  <div className="flex justify-center mt-6">
+                    <button onClick={loadMore} disabled={loading}
+                      className="px-6 py-3 rounded-2xl text-sm font-bold transition-all active:scale-95 disabled:opacity-60"
+                      style={{ background: accent, color: '#0a0c14' }}>
+                      {loading ? 'Loading…' : 'Show more'}
+                    </button>
+                  </div>
+                )}
+              </>
+            ) : (
+              <div className="py-12 text-center">
+                <p className="text-4xl mb-3">🔍</p>
+                <p className="text-white/30 text-sm">Nothing here yet — try another category</p>
+              </div>
+            )}
           </section>
         )}
 
@@ -587,18 +425,12 @@ export default function KidsHome() {
             <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
           </svg>
           <p className="text-xs text-white/25">
-            Safe, curated content — all titles reviewed for young viewers
+            Only titles rated for kids (up to PG / TV-PG) are shown here
           </p>
         </div>
       </div>
+      </>)}
 
-      {/* ── PIN Modal ── */}
-      {showPin && (
-        <PinModal
-          onSuccess={handleExitSuccess}
-          onCancel={() => setShowPin(false)}
-        />
-      )}
     </div>
   )
 }

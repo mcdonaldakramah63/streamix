@@ -1,14 +1,13 @@
 // backend/controllers/tmdbController.js — NEW FILE
 // All new TMDB endpoints: recommendations, credits, videos, person
-const axios = require('axios')
 
-const KEY  = () => process.env.TMDB_API_KEY
-const BASE = 'https://api.themoviedb.org/3'
 
+// Through the shared client: cache, stale copies when TMDB is down, rate limiting, retries (config/tmdb.js)
+const { cachedTmdb } = require('../config/tmdb')
 async function tmdb(path) {
-  const sep = path.includes('?') ? '&' : '?'
-  const { data } = await axios.get(`${BASE}${path}${sep}api_key=${KEY()}&language=en-US`, { timeout: 10000 })
-  return data
+  const [p, qs] = path.split('?')
+  const params = Object.fromEntries(new URLSearchParams(qs || ''))
+  return cachedTmdb(p, { language: 'en-US', ...params })
 }
 
 // ── Movie endpoints ───────────────────────────────────────────────────────────

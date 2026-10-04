@@ -1,320 +1,133 @@
-// frontend/src/components/PinModal.tsx — FULL REPLACEMENT
-import { useState, useEffect, useCallback } from 'react'
+// frontend/src/components/PinModal.tsx — 4-digit PIN pad; the caller verifies (e.g. on the server)
+import { useState, useEffect, useRef } from 'react'
+import { useProfileStore } from '../stores/profileStore'
+import Icon from './Icon'
+import ProfileAvatar from './avatar/ProfileAvatar'
 
 interface Props {
-  title?: string
+  title?:    string
   subtitle?: string
-  storedPin?: string          // validate mode — compare against this
-  onSetPin?: (pin: string) => void  // set mode — called with new pin
-  onSuccess: () => void
-  onCancel?: () => void
+  avatar?:   React.ReactNode
+  /** Resolve null when the PIN is accepted, or an error message */
+  onSubmit:  (pin: string) => Promise<string | null>
+  onCancel:  () => void
 }
 
 const NUMPAD = ['1','2','3','4','5','6','7','8','9','','0','⌫']
 
 export default function PinModal({
-  title = 'Enter PIN',
-  subtitle = 'Enter your 4-digit PIN to continue',
-  storedPin,
-  onSetPin,
-  onSuccess,
-  onCancel,
+  title = 'Enter PIN', subtitle = 'Enter the 4-digit profile PIN', avatar, onSubmit, onCancel,
 }: Props) {
-  const isSetMode = !storedPin && !!onSetPin
+  const [digits,  setDigits]  = useState('')
+  const [error,   setError]   = useState('')
+  const [shake,   setShake]   = useState(false)
+  const [busy,    setBusy]    = useState(false)
+  const [success, setSuccess] = useState(false)
+  const busyRef = useRef(false)
 
-  const [digits, setDigits]     = useState<string[]>([])
-  const [shake, setShake]       = useState(false)
-  const [error, setError]       = useState('')
-  const [success, setSuccess]   = useState(false)
-  const [phase, setPhase]       = useState<'enter' | 'confirm'>('enter')
-  const [firstPin, setFirstPin] = useState('')
-
-  const displayTitle = isSetMode
-    ? (phase === 'enter' ? 'Create PIN' : 'Confirm PIN')
-    : title
-
-  const displaySubtitle = isSetMode
-    ? (phase === 'enter' ? 'Choose a 4-digit PIN for kids mode' : 'Re-enter your PIN to confirm')
-    : subtitle
-
-  const triggerShake = (msg: string) => {
-    setError(msg)
-    setShake(true)
-    setDigits([])
-    setTimeout(() => setShake(false), 550)
+  const press = (key: string) => {
+    if (busyRef.current) return
+    setError('')
+    if (key === '⌫') setDigits(d => d.slice(0, -1))
+    else setDigits(d => (d.length < 4 ? d + key : d))
   }
 
-  const checkPin = useCallback(() => {
-    const pin = digits.join('')
-
-    if (isSetMode) {
-      if (phase === 'enter') {
-        setFirstPin(pin)
-        setDigits([])
-        setPhase('confirm')
-        return
-      }
-      if (pin === firstPin) {
-        setSuccess(true)
-        setTimeout(() => { onSetPin!(pin); onSuccess() }, 400)
+  useEffect(() => {
+    if (digits.length !== 4 || busyRef.current) return
+    busyRef.current = true
+    setBusy(true)
+    onSubmit(digits).then(err => {
+      if (err) {
+        setError(err); setShake(true); setDigits('')
+        setTimeout(() => setShake(false), 550)
       } else {
-        setPhase('enter')
-        setFirstPin('')
-        triggerShake("PINs don't match. Try again.")
+        setSuccess(true)
       }
-      return
-    }
+    }).finally(() => { busyRef.current = false; setBusy(false) })
+  }, [digits, onSubmit])
 
-    if (pin === storedPin) {
-      setSuccess(true)
-      setTimeout(onSuccess, 400)
-    } else {
-      triggerShake('Incorrect PIN. Try again.')
-    }
-  }, [digits, phase, firstPin, isSetMode, storedPin, onSetPin, onSuccess])
-
-  // Auto-submit when 4 digits entered
   useEffect(() => {
-    if (digits.length === 4) {
-      const t = setTimeout(checkPin, 150)
-      return () => clearTimeout(t)
+    const fn = (e: KeyboardEvent) => {
+      if (/^\d$/.test(e.key)) press(e.key)
+      else if (e.key === 'Backspace') press('⌫')
+      else if (e.key === 'Escape') onCancel()
     }
-  }, [digits, checkPin])
-
-  // Keyboard support
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if (e.key >= '0' && e.key <= '9') {
-        setDigits(d => d.length < 4 ? [...d, e.key] : d)
-        setError('')
-      } else if (e.key === 'Backspace') {
-        setDigits(d => d.slice(0, -1))
-        setError('')
-      } else if (e.key === 'Escape') {
-        onCancel?.()
-      }
-    }
-    window.addEventListener('keydown', handler)
-    return () => window.removeEventListener('keydown', handler)
-  }, [onCancel])
-
-  const handleKey = (key: string) => {
-    if (key === '⌫') {
-      setDigits(d => d.slice(0, -1))
-      setError('')
-    } else if (digits.length < 4) {
-      setDigits(d => [...d, key])
-      setError('')
-    }
-  }
+    window.addEventListener('keydown', fn)
+    return () => window.removeEventListener('keydown', fn)
+  }, [onCancel]) // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
-    <div
-      className="fixed inset-0 z-[300] flex items-center justify-center px-5"
-      style={{ background: 'rgba(4,5,9,0.88)', backdropFilter: 'blur(16px)' }}
-      onClick={e => { if (e.target === e.currentTarget) onCancel?.() }}
-    >
-      <div
-        className="w-full max-w-[320px]"
-        style={{ animation: 'pinModalIn 0.3s cubic-bezier(0.34,1.56,0.64,1) both' }}
-      >
-        {/* Card */}
-        <div
-          className="rounded-3xl overflow-hidden"
-          style={{
-            background: 'linear-gradient(160deg, rgba(255,255,255,0.06) 0%, rgba(255,255,255,0.02) 100%)',
-            border: '1px solid rgba(255,255,255,0.1)',
-            boxShadow: '0 40px 100px rgba(0,0,0,0.7), inset 0 1px 0 rgba(255,255,255,0.08)',
-          }}
-        >
-          {/* Header */}
-          <div className="px-8 pt-8 pb-5 text-center">
-            {/* Lock icon */}
-            <div
-              className="w-14 h-14 mx-auto mb-4 rounded-2xl flex items-center justify-center"
-              style={{
-                background: success
-                  ? 'linear-gradient(135deg, rgba(20,184,166,0.25), rgba(20,184,166,0.1))'
-                  : 'rgba(255,255,255,0.06)',
-                border: `1px solid ${success ? 'rgba(20,184,166,0.4)' : 'rgba(255,255,255,0.08)'}`,
-                transition: 'all 0.3s',
-              }}
-            >
-              <span className="text-2xl">{success ? '✓' : isSetMode ? '🔑' : '🔒'}</span>
-            </div>
-
-            <h2
-              className="text-white text-[18px] font-bold mb-1.5"
-              style={{ fontFamily: 'Syne, sans-serif', letterSpacing: '-0.02em' }}
-            >
-              {displayTitle}
-            </h2>
-            <p className="text-slate-400 text-sm leading-snug">{displaySubtitle}</p>
-
-            {/* Step indicator for set mode */}
-            {isSetMode && (
-              <div className="flex justify-center gap-1.5 mt-3">
-                {['enter','confirm'].map((p, i) => (
-                  <div
-                    key={p}
-                    className="h-1 rounded-full transition-all duration-300"
-                    style={{
-                      width: phase === p ? 20 : 6,
-                      background: phase === p ? '#14b8a6' : 'rgba(255,255,255,0.15)',
-                    }}
-                  />
-                ))}
-              </div>
-            )}
+    <div className="fixed inset-0 z-[300] flex items-center justify-center px-5"
+      style={{ background: 'rgba(10,14,23,0.88)', backdropFilter: 'blur(16px)' }}
+      onClick={e => { if (e.target === e.currentTarget) onCancel() }}
+      role="dialog" aria-modal="true" aria-label={title}>
+      <div className="w-full max-w-[330px] glass rounded-3xl overflow-hidden shadow-deep animate-scale-in">
+        <div className="px-8 pt-8 pb-5 text-center">
+          <div className={`w-14 h-14 mx-auto mb-4 rounded-2xl flex items-center justify-center text-2xl ${success ? 'bg-brand/20 shadow-brand-sm' : 'bg-white/[0.06]'}`}>
+            {success ? <Icon name="lock_open" size={26} className="text-brand" /> : avatar || <Icon name="lock" size={26} className="text-ink" />}
           </div>
+          <h2 className="text-white text-lg font-bold mb-1">{title}</h2>
+          <p className="text-ink-muted text-sm">{subtitle}</p>
+        </div>
 
-          {/* PIN dots */}
-          <div className="px-8 pb-5">
-            <div
-              className={`flex justify-center gap-3 mb-2 ${shake ? 'pin-shake' : ''}`}
-              style={{ transition: 'all 0.2s' }}
-            >
-              {[0,1,2,3].map(i => {
-                const filled = i < digits.length
-                return (
-                  <div
-                    key={i}
-                    className="relative flex items-center justify-center transition-all duration-200"
-                    style={{
-                      width: 54,
-                      height: 54,
-                      borderRadius: 16,
-                      background: filled
-                        ? success
-                          ? 'rgba(20,184,166,0.2)'
-                          : 'rgba(20,184,166,0.12)'
-                        : 'rgba(255,255,255,0.04)',
-                      border: `1.5px solid ${
-                        filled
-                          ? success ? 'rgba(20,184,166,0.7)' : 'rgba(20,184,166,0.4)'
-                          : 'rgba(255,255,255,0.08)'
-                      }`,
-                      transform: filled ? 'scale(1.04)' : 'scale(1)',
-                    }}
-                  >
-                    {filled ? (
-                      <div
-                        className="w-2.5 h-2.5 rounded-full"
-                        style={{
-                          background: success ? '#10b981' : '#14b8a6',
-                          animation: 'pinDot 0.18s cubic-bezier(0.34,1.56,0.64,1) both',
-                        }}
-                      />
-                    ) : (
-                      <div
-                        className="w-2 h-2 rounded-full"
-                        style={{ background: 'rgba(255,255,255,0.12)' }}
-                      />
-                    )}
-                  </div>
-                )
-              })}
-            </div>
-
-            {/* Error text */}
-            <div className="h-5 text-center flex items-center justify-center">
-              {error && (
-                <p
-                  className="text-red-400 text-xs font-medium"
-                  style={{ animation: 'fadeIn 0.2s ease' }}
-                >
-                  {error}
-                </p>
-              )}
-            </div>
+        <div className="px-8 pb-4">
+          <div className={`flex justify-center gap-3 ${shake ? 'pin-shake' : ''}`}>
+            {[0, 1, 2, 3].map(i => {
+              const filled = i < digits.length
+              return (
+                <div key={i} className="w-[54px] h-[54px] rounded-2xl flex items-center justify-center transition-all duration-200"
+                  style={{
+                    background: filled ? 'rgba(229,9,20,0.14)' : 'rgba(255,255,255,0.04)',
+                    border: `1.5px solid ${filled ? 'rgba(229,9,20,0.55)' : 'rgba(255,255,255,0.08)'}`,
+                    boxShadow: filled ? '0 0 12px rgba(229,9,20,0.25)' : 'none',
+                  }}>
+                  <div className={`rounded-full transition-all ${filled ? 'w-2.5 h-2.5 bg-brand' : 'w-2 h-2 bg-white/15'}`} />
+                </div>
+              )
+            })}
           </div>
+          <div className="h-6 mt-2 text-center">
+            {busy && <span className="inline-block w-4 h-4 border-2 border-white/10 border-t-brand rounded-full animate-spin" />}
+            {error && !busy && <p className="text-brand-soft text-xs font-semibold">{error}</p>}
+          </div>
+        </div>
 
-          {/* Numpad */}
-          <div className="px-6 pb-6">
-            <div className="grid grid-cols-3 gap-2">
-              {NUMPAD.map((key, i) => {
-                if (key === '') return <div key={i} />
-                const isBack = key === '⌫'
-                return (
-                  <button
-                    key={i}
-                    onClick={() => handleKey(key)}
-                    disabled={!isBack && digits.length >= 4}
-                    className="relative h-[52px] rounded-2xl flex items-center justify-center select-none transition-all duration-100 active:scale-95 disabled:opacity-30"
-                    style={{
-                      background: isBack ? 'rgba(255,255,255,0.03)' : 'rgba(255,255,255,0.06)',
-                      border: '1px solid rgba(255,255,255,0.07)',
-                      fontSize: isBack ? '18px' : '20px',
-                      fontWeight: 600,
-                      color: isBack ? 'rgba(255,255,255,0.45)' : 'white',
-                      letterSpacing: '-0.02em',
-                    }}
-                    onMouseDown={e => {
-                      const el = e.currentTarget as HTMLButtonElement
-                      el.style.background = 'rgba(20,184,166,0.18)'
-                      el.style.borderColor = 'rgba(20,184,166,0.35)'
-                    }}
-                    onMouseUp={e => {
-                      const el = e.currentTarget as HTMLButtonElement
-                      el.style.background = isBack ? 'rgba(255,255,255,0.03)' : 'rgba(255,255,255,0.06)'
-                      el.style.borderColor = 'rgba(255,255,255,0.07)'
-                    }}
-                    onTouchStart={e => {
-                      const el = e.currentTarget as HTMLButtonElement
-                      el.style.background = 'rgba(20,184,166,0.18)'
-                      el.style.borderColor = 'rgba(20,184,166,0.35)'
-                    }}
-                    onTouchEnd={e => {
-                      const el = e.currentTarget as HTMLButtonElement
-                      el.style.background = isBack ? 'rgba(255,255,255,0.03)' : 'rgba(255,255,255,0.06)'
-                      el.style.borderColor = 'rgba(255,255,255,0.07)'
-                    }}
-                  >
-                    {key}
-                  </button>
-                )
-              })}
-            </div>
-
-            {onCancel && (
-              <button
-                onClick={onCancel}
-                className="w-full mt-3 h-11 rounded-2xl text-sm text-slate-500 hover:text-slate-300 transition-colors"
-                style={{
-                  background: 'rgba(255,255,255,0.02)',
-                  border: '1px solid rgba(255,255,255,0.06)',
-                }}
-              >
-                Cancel
+        <div className="px-6 pb-6">
+          <div className="grid grid-cols-3 gap-2">
+            {NUMPAD.map((key, i) => key === '' ? <div key={i} /> : (
+              <button key={i} onClick={() => press(key)} disabled={busy}
+                aria-label={key === '⌫' ? 'Delete digit' : key}
+                className="h-[52px] rounded-2xl flex items-center justify-center text-xl font-semibold text-white bg-white/[0.06] border border-white/[0.07] hover:bg-white/[0.1] active:scale-95 active:bg-brand/20 transition-all disabled:opacity-40">
+                {key === '⌫' ? <Icon name="backspace" size={20} className="text-ink-muted" /> : key}
               </button>
-            )}
+            ))}
           </div>
+          <button onClick={onCancel} className="w-full mt-3 h-11 rounded-full text-sm font-semibold text-ink-muted hover:text-white bg-white/[0.03] border border-white/[0.06]">
+            Cancel
+          </button>
         </div>
       </div>
 
       <style>{`
-        @keyframes pinModalIn {
-          from { opacity: 0; transform: scale(0.86) translateY(16px); }
-          to   { opacity: 1; transform: scale(1) translateY(0); }
-        }
-        @keyframes pinDot {
-          from { transform: scale(0); opacity: 0; }
-          to   { transform: scale(1); opacity: 1; }
-        }
-        @keyframes fadeIn {
-          from { opacity: 0; transform: translateY(-3px); }
-          to   { opacity: 1; transform: translateY(0); }
-        }
-        @keyframes pinShakeAnim {
-          0%,100% { transform: translateX(0); }
-          10%      { transform: translateX(-9px); }
-          30%      { transform: translateX(9px); }
-          50%      { transform: translateX(-6px); }
-          70%      { transform: translateX(6px); }
-          90%      { transform: translateX(-3px); }
-        }
-        .pin-shake { animation: pinShakeAnim 0.55s cubic-bezier(0.36,0.07,0.19,0.97) both; }
+        @keyframes pinShakeAnim { 0%,100%{transform:translateX(0)} 20%{transform:translateX(-9px)} 40%{transform:translateX(9px)} 60%{transform:translateX(-6px)} 80%{transform:translateX(6px)} }
+        .pin-shake { animation: pinShakeAnim 0.5s cubic-bezier(0.36,0.07,0.19,0.97) both; }
       `}</style>
     </div>
+  )
+}
+
+/** Mounted once in App — answers PIN requests from profileStore.setActive */
+export function PinGate() {
+  const { pinRequest, submitPin, cancelPin } = useProfileStore()
+  if (!pinRequest) return null
+  const p = pinRequest.profile
+  return (
+    <PinModal
+      title={`Unlock ${p.name}`}
+      subtitle="This profile is protected with a PIN"
+      avatar={<ProfileAvatar p={p} className="w-14 h-14 rounded-2xl" emojiSize="text-2xl" />}
+      onSubmit={submitPin}
+      onCancel={cancelPin}
+    />
   )
 }
